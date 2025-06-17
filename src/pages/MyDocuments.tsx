@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, Plus, Search, Trash2, AlertCircle, ArrowDownUp, Sparkles, Calendar, BookOpen, Filter } from 'lucide-react';
+import { ArrowLeft, FileText, Plus, Search, Trash2, AlertCircle, Sparkles, Calendar, BookOpen, Filter } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { documentService, type Document } from '../services/documentService';
 

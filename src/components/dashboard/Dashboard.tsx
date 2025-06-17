@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { LogOut, FileText, Settings, User, Trash2, BookOpen, Target, Zap, TrendingUp, Award, Sparkles } from 'lucide-react';
+import { LogOut, FileText, User, Trash2, BookOpen, Target, Zap, TrendingUp, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { authService } from '../../services/authService';
 import { useAuthStore } from '../../store/authStore';

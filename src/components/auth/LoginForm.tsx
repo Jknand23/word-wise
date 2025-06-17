@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, Lock, LogIn, Sparkles, BookOpen, Users, Shield, Star } from 'lucide-react';
+import { Mail, Lock, LogIn, Sparkles, BookOpen, Shield, Star } from 'lucide-react';
 import { authService } from '../../services/authService';
 import { useAuthStore } from '../../store/authStore';
 
@@ -24,21 +24,7 @@ const LoginForm = () => {
     }
   };
 
-  const handleGoogleLogin = async () => {
-    setIsLoading(true);
-    clearError();
 
-    try {
-      console.log('Starting Google authentication popup...');
-      await authService.signInWithGoogle();
-      // User will be automatically redirected to dashboard by the auth state change
-    } catch (error) {
-      console.error('Google login failed:', error);
-      // Error is already handled in authService and displayed via useAuthStore
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-encouraging-gradient flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">

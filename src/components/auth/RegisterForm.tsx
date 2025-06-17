@@ -7,25 +7,21 @@ import { useAuthStore } from '../../store/authStore';
 const RegisterForm = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+
   const [displayName, setDisplayName] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const { error, clearError } = useAuthStore();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
+    setLoading(true);
     clearError();
 
-    if (password !== confirmPassword) {
-      useAuthStore.getState().setError('Passwords do not match');
-      setIsLoading(false);
-      return;
-    }
+
 
     if (password.length < 6) {
       useAuthStore.getState().setError('Password must be at least 6 characters long');
-      setIsLoading(false);
+      setLoading(false);
       return;
     }
 
@@ -34,22 +30,11 @@ const RegisterForm = () => {
     } catch (error) {
       console.error('Registration failed:', error);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  const handleGoogleLogin = async () => {
-    setIsLoading(true);
-    clearError();
 
-    try {
-      await authService.signInWithGoogle();
-    } catch (error) {
-      console.error('Google login failed:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-encouraging-gradient flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
@@ -167,15 +152,15 @@ const RegisterForm = () => {
             <div>
               <button
                 type="submit"
-                disabled={isLoading}
+                disabled={loading}
                 className="warm-button w-full flex justify-center items-center py-3 px-4 text-sm font-medium"
               >
-                {isLoading ? (
+                {loading ? (
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
                 ) : (
                   <UserPlus className="h-5 w-5 mr-2" />
                 )}
-                {isLoading ? 'Creating account...' : 'Create Account'}
+                {loading ? 'Creating account...' : 'Create Account'}
               </button>
             </div>
             

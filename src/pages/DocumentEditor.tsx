@@ -285,67 +285,90 @@ const DocumentEditor: React.FC = () => {
         textAtIndices: documentContent.slice(suggestion.startIndex, suggestion.endIndex)
       });
 
-      // Verify the suggestion is still valid
+      // Verify the suggestion is still valid against current content
       const actualTextAtIndices = documentContent.slice(suggestion.startIndex, suggestion.endIndex);
+      let validStartIndex = suggestion.startIndex;
+      let validEndIndex = suggestion.endIndex;
+      
       if (actualTextAtIndices !== suggestion.originalText) {
         console.warn('DocumentEditor: Suggestion indices are stale, text has changed');
+        console.log('Expected:', suggestion.originalText);
+        console.log('Found at indices:', actualTextAtIndices);
         
-        // Try to find the correct position of the text
+        // Try to find the correct position of the original text
         const actualIndex = documentContent.indexOf(suggestion.originalText);
         if (actualIndex === -1) {
-          console.error('DocumentEditor: Original text not found, cannot apply suggestion');
+          console.error('DocumentEditor: Original text not found in current content, cannot apply suggestion');
+          console.log('Current content:', documentContent);
+          console.log('Looking for:', suggestion.originalText);
+          
+          // Remove this stale suggestion from the store
+          await rejectSuggestion(suggestion.id);
           return;
         }
         
-        console.log('DocumentEditor: Updating suggestion indices', {
+        // Update to the correct indices
+        validStartIndex = actualIndex;
+        validEndIndex = actualIndex + suggestion.originalText.length;
+        
+        console.log('DocumentEditor: Found correct position', {
           oldStart: suggestion.startIndex,
           oldEnd: suggestion.endIndex,
-          newStart: actualIndex,
-          newEnd: actualIndex + suggestion.originalText.length
+          newStart: validStartIndex,
+          newEnd: validEndIndex,
+          foundText: documentContent.slice(validStartIndex, validEndIndex)
         });
-        
-        suggestion.startIndex = actualIndex;
-        suggestion.endIndex = actualIndex + suggestion.originalText.length;
       }
 
-      // Apply the suggestion to the document content
+      // Apply the suggestion to the document content using valid indices
       const newContent = 
-        documentContent.slice(0, suggestion.startIndex) +
+        documentContent.slice(0, validStartIndex) +
         suggestion.suggestedText +
-        documentContent.slice(suggestion.endIndex);
+        documentContent.slice(validEndIndex);
       
-      console.log('DocumentEditor: New content after suggestion:', newContent);
+      console.log('DocumentEditor: Applying text replacement:', {
+        before: documentContent.slice(Math.max(0, validStartIndex - 20), validStartIndex + 20),
+        replacing: documentContent.slice(validStartIndex, validEndIndex),
+        with: suggestion.suggestedText,
+        after: newContent.slice(Math.max(0, validStartIndex - 20), validStartIndex + suggestion.suggestedText.length + 20)
+      });
       
+      // Update the document content
       setDocumentContent(newContent);
       setSelectedSuggestion(null);
       
-      // Validate remaining suggestions after text change and trigger re-analysis
-      setTimeout(async () => {
-        await validateAndCleanSuggestions(newContent);
-        
-        // Auto-reanalyze to find any new issues that may have been revealed
-        if (newContent.trim().length > 3) {
-          console.log('Triggering re-analysis after suggestion acceptance to find remaining issues...');
-          setTimeout(async () => {
-            if (user && documentId) {
-              try {
-                await requestAnalysis({
-                  documentId,
-                  userId: user.uid,
-                  content: newContent,
-                  analysisType: 'full'
-                });
-                console.log('Re-analysis triggered successfully');
-              } catch (error) {
-                console.error('Failed to trigger re-analysis:', error);
-              }
-            }
-          }, 500); // Wait for suggestion cleanup to complete
+      // Clear all remaining suggestions since indices are now invalid
+      // The re-analysis will generate fresh suggestions with correct indices
+      console.log('DocumentEditor: Clearing all suggestions due to text change');
+      suggestions.forEach(s => {
+        if (s.id !== suggestion.id) {
+          rejectSuggestion(s.id).catch(error => {
+            console.error('Failed to clear stale suggestion:', error);
+          });
         }
-      }, 100); // Small delay to let the state update
+      });
+      
+      // Trigger fresh analysis after a short delay to let the text update settle
+      setTimeout(async () => {
+        if (newContent.trim().length > 3 && user && (currentDocumentId || documentId)) {
+          console.log('Triggering fresh analysis after suggestion acceptance...');
+          try {
+            await requestAnalysis({
+              documentId: currentDocumentId || documentId || '',
+              userId: user.uid,
+              content: newContent,
+              analysisType: 'full'
+            });
+            console.log('Fresh analysis triggered successfully');
+          } catch (error) {
+            console.error('Failed to trigger fresh analysis:', error);
+          }
+        }
+      }, 1000); // Wait 1 second for content to settle
       
       // Auto-save the change
       setTimeout(() => handleSave(), 500);
+      
     } catch (error) {
       console.error('Failed to apply suggestion:', error);
     }

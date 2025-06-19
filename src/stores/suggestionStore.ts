@@ -94,12 +94,13 @@ export const useSuggestionStore = create<SuggestionStore>()(
         }
       },
 
-      // Accept a suggestion
+      // Accept suggestion
       acceptSuggestion: async (suggestionId: string) => {
         set({ error: null });
         try {
           await suggestionService.acceptSuggestion(suggestionId);
-          // Remove accepted suggestion and update indices of remaining suggestions
+          
+          // Get current suggestions
           const currentSuggestions = get().suggestions;
           const acceptedSuggestion = currentSuggestions.find(s => s.id === suggestionId);
           
@@ -111,31 +112,13 @@ export const useSuggestionStore = create<SuggestionStore>()(
               acceptedSuggestion.suggestedText
             );
             console.log(`[SuggestionStore] Successfully tracked modification for ${acceptedSuggestion.type} suggestion:`, acceptedSuggestion.id);
-
-            // Calculate the change in text length
-            const lengthDifference = acceptedSuggestion.suggestedText.length - acceptedSuggestion.originalText.length;
-            
-            // Update indices of all suggestions that come after the accepted one
-            const updatedSuggestions = currentSuggestions
-              .filter(s => s.id !== suggestionId) // Remove the accepted suggestion
-              .map(s => {
-                if (s.startIndex > acceptedSuggestion.endIndex) {
-                  // Shift indices for suggestions after the accepted one
-                  return {
-                    ...s,
-                    startIndex: s.startIndex + lengthDifference,
-                    endIndex: s.endIndex + lengthDifference
-                  };
-                }
-                return s;
-              });
-            
-            set({ suggestions: updatedSuggestions });
-          } else {
-            // Fallback: just remove the suggestion if we can't find it
-            const updatedSuggestions = currentSuggestions.filter(s => s.id !== suggestionId);
-            set({ suggestions: updatedSuggestions });
           }
+
+          // Simply remove the accepted suggestion - don't try to update indices here
+          // The document editor will handle content updates and trigger fresh analysis
+          const updatedSuggestions = currentSuggestions.filter(s => s.id !== suggestionId);
+          set({ suggestions: updatedSuggestions });
+          
         } catch (error) {
           console.error('Failed to accept suggestion:', error);
           set({ 

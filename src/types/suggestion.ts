@@ -7,6 +7,9 @@ export interface Suggestion {
   originalText: string;
   suggestedText: string;
   explanation: string;
+  grammarRule?: string;
+  educationalExplanation?: string;
+  example?: string;
   startIndex: number;
   endIndex: number;
   confidence: number; // 0-1

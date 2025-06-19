@@ -51,6 +51,10 @@
         {
           "fieldPath": "lastModified",
           "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
         }
       ]
     }

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Sparkles, Loader } from 'lucide-react';
 import { useSuggestionStore } from '../../stores/suggestionStore';
+import SuggestionTooltip from './SuggestionTooltip';
 import type { Suggestion } from '../../types/suggestion';
 
 interface TextEditorProps {
@@ -22,13 +23,17 @@ const TextEditor: React.FC<TextEditorProps> = ({
 }) => {
   const [content, setContent] = useState(initialContent);
   const [isTyping, setIsTyping] = useState(false);
+  const [tooltipSuggestion, setTooltipSuggestion] = useState<Suggestion | null>(null);
+  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
+  const [tooltipVisible, setTooltipVisible] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { 
     suggestions, 
     isAnalyzing, 
     requestAnalysis,
-    acceptSuggestion
+    acceptSuggestion,
+    rejectSuggestion
   } = useSuggestionStore();
 
   // Update content when initialContent changes
@@ -44,6 +49,19 @@ const TextEditor: React.FC<TextEditorProps> = ({
       }
     };
   }, []);
+
+  // Handle escape key to close tooltip
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && tooltipVisible) {
+        setTooltipVisible(false);
+        setTooltipSuggestion(null);
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [tooltipVisible]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -137,10 +155,43 @@ const TextEditor: React.FC<TextEditorProps> = ({
   };
 
   const applySuggestion = async (suggestion: Suggestion) => {
+    // Verify the suggestion is still valid against current content
+    const actualTextAtIndices = content.slice(suggestion.startIndex, suggestion.endIndex);
+    let validStartIndex = suggestion.startIndex;
+    let validEndIndex = suggestion.endIndex;
+    
+    if (actualTextAtIndices !== suggestion.originalText) {
+      console.warn('TextEditor: Suggestion indices are stale, text has changed');
+      console.log('Expected:', suggestion.originalText);
+      console.log('Found at indices:', actualTextAtIndices);
+      
+      // Try to find the correct position of the original text
+      const actualIndex = content.indexOf(suggestion.originalText);
+      if (actualIndex === -1) {
+        console.error('TextEditor: Original text not found in current content, cannot apply suggestion');
+        
+        // Reject this stale suggestion
+        await rejectSuggestion(suggestion.id);
+        return;
+      }
+      
+      // Update to the correct indices
+      validStartIndex = actualIndex;
+      validEndIndex = actualIndex + suggestion.originalText.length;
+      
+      console.log('TextEditor: Found correct position', {
+        oldStart: suggestion.startIndex,
+        oldEnd: suggestion.endIndex,
+        newStart: validStartIndex,
+        newEnd: validEndIndex
+      });
+    }
+    
+    // Apply the suggestion using valid indices
     const newContent = 
-      content.slice(0, suggestion.startIndex) +
+      content.slice(0, validStartIndex) +
       suggestion.suggestedText +
-      content.slice(suggestion.endIndex);
+      content.slice(validEndIndex);
     
     setContent(newContent);
     onContentChange?.(newContent);
@@ -149,14 +200,110 @@ const TextEditor: React.FC<TextEditorProps> = ({
     await acceptSuggestion(suggestion.id);
   };
 
+  const handleTextareaClick = (event: React.MouseEvent<HTMLTextAreaElement>) => {
+    const textarea = event.target as HTMLTextAreaElement;
+    const clickPosition = textarea.selectionStart;
+    
+    // Find suggestion that contains this click position
+    // First validate suggestion indices to ensure accurate click detection
+    const clickedSuggestion = suggestions.find(suggestion => {
+      const actualTextAtIndices = content.slice(suggestion.startIndex, suggestion.endIndex);
+      let validStartIndex = suggestion.startIndex;
+      let validEndIndex = suggestion.endIndex;
+      
+      if (actualTextAtIndices !== suggestion.originalText) {
+        // Indices are stale, try to find the correct position
+        const actualIndex = content.indexOf(suggestion.originalText);
+        if (actualIndex === -1) {
+          return false; // Text not found, can't match this suggestion
+        }
+        validStartIndex = actualIndex;
+        validEndIndex = actualIndex + suggestion.originalText.length;
+      }
+      
+      // Check if click position is within the validated range
+      return clickPosition >= validStartIndex && clickPosition <= validEndIndex;
+    });
+    
+    if (clickedSuggestion) {
+      // Show tooltip for this suggestion
+      setTooltipSuggestion(clickedSuggestion);
+      
+      // Position tooltip to the left side of the text editor
+      const rect = textarea.getBoundingClientRect();
+      
+      // Position to the left of the text editor area
+      const x = rect.left - 345; // 325px width + 20px gap
+      const y = rect.top + 20; // Slight offset from top
+      
+      setTooltipPosition({ x, y });
+      setTooltipVisible(true);
+      
+      // Prevent default text selection behavior when clicking on suggestions
+      event.preventDefault();
+    } else {
+      // Normal text click - hide tooltip and allow normal cursor positioning
+      if (tooltipVisible) {
+        setTooltipVisible(false);
+        setTooltipSuggestion(null);
+      }
+      // Don't prevent default for normal text clicks
+    }
+  };
+
+  const handleTooltipAccept = async () => {
+    if (tooltipSuggestion) {
+      await applySuggestion(tooltipSuggestion);
+      setTooltipVisible(false);
+      setTooltipSuggestion(null);
+    }
+  };
+
+  const handleTooltipReject = async () => {
+    if (tooltipSuggestion) {
+      await rejectSuggestion(tooltipSuggestion.id);
+      setTooltipVisible(false);
+      setTooltipSuggestion(null);
+    }
+  };
+
   const renderHighlightedText = () => {
     if (suggestions.length === 0 || !highlightsVisible) return content;
 
-    const sortedSuggestions = [...suggestions].sort((a, b) => a.startIndex - b.startIndex);
+    // Validate and fix suggestion indices before highlighting
+    const validatedSuggestions = suggestions.map(suggestion => {
+      const actualTextAtIndices = content.slice(suggestion.startIndex, suggestion.endIndex);
+      
+      if (actualTextAtIndices === suggestion.originalText) {
+        // Indices are correct
+        return suggestion;
+      }
+      
+      // Indices are stale, try to find the correct position
+      const actualIndex = content.indexOf(suggestion.originalText);
+      if (actualIndex !== -1) {
+        // Found the text at a different position
+        return {
+          ...suggestion,
+          startIndex: actualIndex,
+          endIndex: actualIndex + suggestion.originalText.length
+        };
+      }
+      
+      // Text not found, mark as invalid
+      return null;
+    }).filter(s => s !== null) as Suggestion[];
+
+    const sortedSuggestions = validatedSuggestions.sort((a, b) => a.startIndex - b.startIndex);
     let highlightedContent = '';
     let lastIndex = 0;
 
     sortedSuggestions.forEach((suggestion) => {
+      // Ensure we don't have overlapping suggestions
+      if (suggestion.startIndex < lastIndex) {
+        return; // Skip overlapping suggestions
+      }
+      
       // Add text before suggestion
       highlightedContent += content.slice(lastIndex, suggestion.startIndex);
       
@@ -177,15 +324,15 @@ const TextEditor: React.FC<TextEditorProps> = ({
   const getSuggestionHighlightColor = (type: Suggestion['type']) => {
     switch (type) {
       case 'spelling':
-        return 'bg-red-200 border-b-2 border-red-400 cursor-pointer';
+        return 'bg-red-200 bg-opacity-30 border-b-2 border-red-400 cursor-pointer hover:bg-opacity-50';
       case 'clarity':
-        return 'bg-yellow-200 border-b-2 border-yellow-400 cursor-pointer';
+        return 'bg-yellow-200 bg-opacity-30 border-b-2 border-yellow-400 cursor-pointer hover:bg-opacity-50';
       case 'engagement':
-        return 'bg-blue-200 border-b-2 border-blue-400 cursor-pointer';
+        return 'bg-blue-200 bg-opacity-30 border-b-2 border-blue-400 cursor-pointer hover:bg-opacity-50';
       case 'grammar':
-        return 'bg-orange-200 border-b-2 border-orange-400 cursor-pointer';
+        return 'bg-orange-200 bg-opacity-30 border-b-2 border-orange-400 cursor-pointer hover:bg-opacity-50';
       default:
-        return 'bg-gray-200 border-b-2 border-gray-400 cursor-pointer';
+        return 'bg-gray-200 bg-opacity-30 border-b-2 border-gray-400 cursor-pointer hover:bg-opacity-50';
     }
   };
 
@@ -193,7 +340,14 @@ const TextEditor: React.FC<TextEditorProps> = ({
     <div className="h-full flex flex-col bg-white">
       {/* Editor Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-200">
-        <h2 className="text-lg font-semibold text-gray-900">Document Editor</h2>
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Document Editor</h2>
+          {suggestions.length > 0 && (
+            <p className="text-xs text-gray-500 mt-1">
+              Click on highlighted text to see detailed suggestions
+            </p>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           {isTyping && (
             <span className="text-xs text-gray-500 flex items-center">
@@ -220,13 +374,15 @@ const TextEditor: React.FC<TextEditorProps> = ({
       <div className="flex-1 relative">
         {/* Background highlighting layer */}
         <div 
-          className="absolute inset-4 pointer-events-none text-transparent whitespace-pre-wrap break-words overflow-hidden"
+          className="absolute inset-4 text-transparent whitespace-pre-wrap break-words overflow-hidden select-none"
           style={{
             fontFamily: 'inherit',
             fontSize: 'inherit',
             lineHeight: 'inherit',
             padding: '0',
             border: 'none',
+            pointerEvents: 'none',
+            zIndex: 1,
           }}
           dangerouslySetInnerHTML={{ __html: renderHighlightedText() }}
         />
@@ -236,8 +392,9 @@ const TextEditor: React.FC<TextEditorProps> = ({
           ref={textareaRef}
           value={content}
           onChange={(e) => handleContentChange(e.target.value)}
+          onClick={handleTextareaClick}
           placeholder="Start writing your document here..."
-          className="w-full h-full p-4 resize-none border-none outline-none bg-transparent relative z-10"
+          className="w-full h-full p-4 resize-none border-none outline-none bg-transparent relative z-2"
           style={{
             minHeight: 'calc(100vh - 200px)',
             fontFamily: 'Inter, system-ui, sans-serif',
@@ -275,6 +432,17 @@ const TextEditor: React.FC<TextEditorProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {/* Suggestion Tooltip */}
+      {tooltipSuggestion && (
+        <SuggestionTooltip
+          suggestion={tooltipSuggestion}
+          isVisible={tooltipVisible}
+          position={tooltipPosition}
+          onAccept={handleTooltipAccept}
+          onReject={handleTooltipReject}
+        />
       )}
     </div>
   );

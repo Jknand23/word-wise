@@ -323,17 +323,19 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                             "{suggestion.originalText}"
                           </span>
                         </div>
-                        <div className="text-sm">
+                        <div className="text-sm mb-1">
                           <span className="font-medium text-gray-700">Suggested:</span>
                           <span className="ml-2 bg-green-100 px-1 rounded">
                             "{suggestion.suggestedText}"
                           </span>
                         </div>
+                        <div className="text-sm">
+                          <span className="font-medium text-gray-700">Rule:</span>
+                          <span className="ml-2 bg-blue-100 px-2 py-1 rounded text-blue-800 text-xs font-medium">
+                            {suggestion.grammarRule || `${suggestion.type.charAt(0).toUpperCase() + suggestion.type.slice(1)} ${suggestion.category.charAt(0).toUpperCase() + suggestion.category.slice(1)}`}
+                          </span>
+                        </div>
                       </div>
-                      
-                      <p className="text-sm text-gray-600 mb-3">
-                        {suggestion.explanation}
-                      </p>
                       
                       <div className="flex gap-2">
                         <button

@@ -186,6 +186,9 @@ export const analyzeSuggestions = onCall({
           - originalText: the exact text to be replaced
           - suggestedText: the improved version
           - explanation: why this change is recommended
+          - grammarRule: the specific grammar rule or error type (e.g., "Subject-Verb Agreement", "Missing Apostrophe", "Spelling Error")
+          - educationalExplanation: a clear, simple explanation suitable for middle/high school students
+          - example: a simple example sentence demonstrating the correct usage
           - confidence: a number between 0 and 1 indicating confidence in the suggestion
           
           Return the response as a JSON object with a "suggestions" array.`
@@ -393,6 +396,9 @@ export const analyzeSuggestions = onCall({
         originalText: suggestion.originalText,
         suggestedText: suggestion.suggestedText,
         explanation: suggestion.explanation,
+        grammarRule: suggestion.grammarRule,
+        educationalExplanation: suggestion.educationalExplanation,
+        example: suggestion.example,
         startIndex,
         endIndex: endIndex,
         confidence: suggestion.confidence,
@@ -452,15 +458,64 @@ async function generateMockSuggestions(content: string, documentId: string, user
   const mockSuggestions = [];
   const analysisId = `mock_analysis_${Date.now()}`;
 
-  // Check for common spelling errors
+  // Check for common spelling errors with specific rules
   const spellingErrors = [
-    { wrong: 'teh', correct: 'the' },
-    { wrong: 'recieve', correct: 'receive' },
-    { wrong: 'definately', correct: 'definitely' },
-    { wrong: 'seperate', correct: 'separate' },
-    { wrong: 'occured', correct: 'occurred' },
-    { wrong: 'accomodate', correct: 'accommodate' },
-    { wrong: 'neccessary', correct: 'necessary' },
+    { 
+      wrong: 'teh', 
+      correct: 'the',
+      rule: 'Common Misspelling',
+      explanation: 'This is a common typo. Always double-check "the" - it\'s the most used word in English.',
+      example: 'The cat sat on the mat.'
+    },
+    { 
+      wrong: 'freind', 
+      correct: 'friend',
+      rule: 'I Before E Rule',
+      explanation: 'Remember: "i before e except after c." Friend follows this rule.',
+      example: 'My friend and I went to the store.'
+    },
+    { 
+      wrong: 'recieve', 
+      correct: 'receive',
+      rule: 'I Before E Exception',
+      explanation: 'Exception to "i before e": use "ei" after "c" as in "receive."',
+      example: 'I will receive the package tomorrow.'
+    },
+    { 
+      wrong: 'definately', 
+      correct: 'definitely',
+      rule: 'Double Letters',
+      explanation: 'Remember: "definitely" has "i" not "a" in the middle.',
+      example: 'I will definitely be there on time.'
+    },
+    { 
+      wrong: 'seperate', 
+      correct: 'separate',
+      rule: 'Vowel Confusion',
+      explanation: 'Use "a" not "e" in the middle: sep-a-rate.',
+      example: 'Please separate the red and blue items.'
+    },
+    { 
+      wrong: 'occured', 
+      correct: 'occurred',
+      rule: 'Double Consonants',
+      explanation: 'Double the "r" when adding "-ed" to words ending in consonant-vowel-consonant.',
+      example: 'The accident occurred yesterday.'
+    },
+    { 
+      wrong: 'accomodate', 
+      correct: 'accommodate',
+      rule: 'Double Letters',
+      explanation: 'Remember: accommodate has double "c" and double "m".',
+      example: 'The hotel can accommodate 200 guests.'
+    },
+    { 
+      wrong: 'neccessary', 
+      correct: 'necessary',
+      rule: 'Single vs Double Letters',
+      explanation: 'One "c" and double "s": nec-es-sary.',
+      example: 'It is necessary to study for the test.'
+    },
   ];
 
   const batch = db.batch();
@@ -480,7 +535,10 @@ async function generateMockSuggestions(content: string, documentId: string, user
         severity: 'high',
         originalText: match[0],
         suggestedText: error.correct,
-        explanation: `Spelling error: '${match[0]}' should be '${error.correct}'`,
+        explanation: error.explanation,
+        grammarRule: error.rule,
+        educationalExplanation: error.explanation,
+        example: error.example,
         startIndex: match.index,
         endIndex: match.index + match[0].length,
         confidence: 0.95,
@@ -512,6 +570,9 @@ async function generateMockSuggestions(content: string, documentId: string, user
       originalText: match[0],
       suggestedText: match[1],
       explanation: `Remove repetitive word: '${match[0]}' can be simplified to '${match[1]}'`,
+      grammarRule: 'Word Repetition',
+      educationalExplanation: `Avoid repeating the same word twice in a row. It makes your writing clearer and more professional.`,
+      example: `Correct: "The big house" (not "The big big house")`,
       startIndex: match.index,
       endIndex: match.index + match[0].length,
       confidence: 0.8,
@@ -529,37 +590,47 @@ async function generateMockSuggestions(content: string, documentId: string, user
     });
   }
 
-  // Check for common grammar patterns that fix multiple issues
-  // Process these FIRST to ensure they get priority over OpenAI suggestions
-  const grammarPatterns = [
+  // Check for specific grammar patterns
+  const grammarChecks = [
+    // Missing apostrophes in contractions
     {
-      pattern: /^lets go to teh (\w+)$/gi,
-      replacement: "Let's go to the $1.",
-      explanation: "Fixed grammar: Capitalized sentence, use 'Let's' (contraction), corrected spelling of 'the', and added punctuation",
-      priority: 1 // Highest priority
+      from: /\b(dont|doesnt|wont|cant|shouldnt|wouldnt|couldnt)\b/gi,
+      to: (match: string) => {
+        const corrections: { [key: string]: string } = {
+          'dont': "don't", 'doesnt': "doesn't", 'wont': "won't", 
+          'cant': "can't", 'shouldnt': "shouldn't", 'wouldnt': "wouldn't", 'couldnt': "couldn't"
+        };
+        return corrections[match.toLowerCase()] || match;
+      },
+      rule: 'Missing Apostrophe',
+      explanation: 'Contractions need apostrophes to show missing letters.',
+      example: "She doesn't like ice cream."
     },
+    // Subject-verb agreement errors
     {
-      pattern: /^([a-z][^.!?]*[a-zA-Z])$/,
-      replacement: "", // Will be handled in the replacement logic
-      explanation: "Fixed grammar: Capitalized sentence start and added proper punctuation",
-      priority: 2
+      from: /\b(he|she|it)\s+(dont)\b/gi,
+      to: (match: string) => {
+        const parts = match.split(/\s+/);
+        return `${parts[0]} doesn't`;
+      },
+      rule: 'Subject-Verb Agreement',
+      explanation: "Use 'doesn't' with 'he/she/it' subjects. 'Don't' is used with 'I/you/they/we'.",
+      example: "She doesn't like bananas."
     }
   ];
 
-  // Process grammar patterns BEFORE other suggestions
-  grammarPatterns.forEach(grammarPattern => {
+  // Process grammar checks BEFORE other suggestions
+  grammarChecks.forEach(grammarCheck => {
     let match: RegExpExecArray | null;
-    while ((match = grammarPattern.pattern.exec(content)) !== null) {
-      let suggestedText: string;
-      
-      // Handle different types of grammar fixes
-      if (grammarPattern.explanation.includes('Capitalized sentence start and added proper punctuation')) {
-        // Capitalize first letter and add punctuation
-        const originalText = match[0];
-        suggestedText = originalText.charAt(0).toUpperCase() + originalText.slice(1) + '.';
-      } else {
-        // Use standard replacement with variable substitution
-        suggestedText = grammarPattern.replacement.replace(/\$(\d+)/g, (_, num) => match![parseInt(num)] || '');
+    grammarCheck.from.lastIndex = 0; // Reset regex state
+    
+    while ((match = grammarCheck.from.exec(content)) !== null) {
+      const originalText = match[0];
+      const suggestedText = grammarCheck.to(originalText);
+
+      // Skip if no actual change
+      if (suggestedText === originalText) {
+        continue;
       }
 
       const suggestionData = {
@@ -568,15 +639,17 @@ async function generateMockSuggestions(content: string, documentId: string, user
         type: 'grammar',
         category: 'error',
         severity: 'high',
-        originalText: match[0],
+        originalText,
         suggestedText,
-        explanation: grammarPattern.explanation,
+        explanation: grammarCheck.explanation,
+        grammarRule: grammarCheck.rule,
+        educationalExplanation: grammarCheck.explanation,
+        example: grammarCheck.example,
         startIndex: match.index,
         endIndex: match.index + match[0].length,
-        confidence: 0.95, // Higher confidence than OpenAI suggestions
+        confidence: 0.95,
         status: 'pending',
         analysisId,
-        priority: grammarPattern.priority,
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       };
@@ -592,11 +665,46 @@ async function generateMockSuggestions(content: string, documentId: string, user
 
   // Check for weak phrases
   const weakPhrases = [
-    { weak: 'very good', strong: 'excellent', type: 'engagement' },
-    { weak: 'pretty nice', strong: 'appealing', type: 'engagement' },
-    { weak: 'kind of', strong: 'somewhat', type: 'clarity' },
-    { weak: 'a lot of', strong: 'many', type: 'clarity' },
-    { weak: 'really cool', strong: 'impressive', type: 'engagement' },
+    { 
+      weak: 'very good', 
+      strong: 'excellent', 
+      type: 'engagement',
+      rule: 'Strong Adjectives',
+      explanation: 'Use strong, specific adjectives instead of weak modifiers like "very."',
+      example: 'The movie was excellent (not "very good").'
+    },
+    { 
+      weak: 'pretty nice', 
+      strong: 'appealing', 
+      type: 'engagement',
+      rule: 'Precise Language',
+      explanation: 'Replace vague phrases with specific, descriptive words.',
+      example: 'The design is appealing (not "pretty nice").'
+    },
+    { 
+      weak: 'kind of', 
+      strong: 'somewhat', 
+      type: 'clarity',
+      rule: 'Formal Writing',
+      explanation: 'Use "somewhat" instead of the informal "kind of" in formal writing.',
+      example: 'I am somewhat tired (not "kind of tired").'
+    },
+    { 
+      weak: 'a lot of', 
+      strong: 'many', 
+      type: 'clarity',
+      rule: 'Quantifier Precision',
+      explanation: 'Use specific quantifiers like "many" instead of vague phrases.',
+      example: 'There are many books (not "a lot of books").'
+    },
+    { 
+      weak: 'really cool', 
+      strong: 'impressive', 
+      type: 'engagement',
+      rule: 'Professional Tone',
+      explanation: 'Use formal adjectives in professional writing instead of casual terms.',
+      example: 'The technology is impressive (not "really cool").'
+    },
   ];
 
   weakPhrases.forEach(phrase => {
@@ -610,7 +718,10 @@ async function generateMockSuggestions(content: string, documentId: string, user
         severity: 'low',
         originalText: content.substr(index, phrase.weak.length),
         suggestedText: phrase.strong,
-        explanation: `Consider using '${phrase.strong}' instead of '${phrase.weak}' for more impact`,
+        explanation: phrase.explanation,
+        grammarRule: phrase.rule,
+        educationalExplanation: phrase.explanation,
+        example: phrase.example,
         startIndex: index,
         endIndex: index + phrase.weak.length,
         confidence: 0.7,

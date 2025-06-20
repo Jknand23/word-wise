@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Share2, AlertCircle, LayoutGrid, PanelRight } from 'lucide-react';
+import { ArrowLeft, Save, Share2, AlertCircle, LayoutGrid, PanelRight, FileText } from 'lucide-react';
 import TextEditor from '../components/ai/TextEditor';
 import SuggestionsPanel from '../components/ai/SuggestionsPanel';
 import StructureSidebar from '../components/ai/StructureSidebar';
+import RubricManager from '../components/ai/RubricManager';
+import RubricFeedbackPanel from '../components/ai/RubricFeedbackPanel';
 import { useAuthStore } from '../store/authStore';
 import { useSuggestionStore } from '../stores/suggestionStore';
 import { useWritingGoalsStore } from '../store/writingGoalsStore';
 import { documentService } from '../services/documentService';
-import type { Suggestion, EssaySection } from '../types/suggestion';
+import type { Suggestion, EssaySection, AssignmentRubric, RubricFeedback } from '../types/suggestion';
 
 const DocumentEditor: React.FC = () => {
   const { documentId } = useParams<{ documentId: string }>();
@@ -24,6 +26,12 @@ const DocumentEditor: React.FC = () => {
   const [highlightsVisible, setHighlightsVisible] = useState<boolean>(true);
 
   const [selectedSection, setSelectedSection] = useState<EssaySection | null>(null);
+  
+  // Rubric-related state
+  const [showRubricManager, setShowRubricManager] = useState(false);
+  const [selectedRubric, setSelectedRubric] = useState<AssignmentRubric | null>(null);
+  const [rubricFeedback, setRubricFeedback] = useState<RubricFeedback | null>(null);
+  const [activeRightPanel, setActiveRightPanel] = useState<'suggestions' | 'rubric'>('suggestions');
   
   // Track the current document ID - this will be updated when a new document is created
   const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
@@ -462,6 +470,16 @@ const DocumentEditor: React.FC = () => {
     }
   };
 
+  const handleRubricSelect = (rubric: AssignmentRubric) => {
+    setSelectedRubric(rubric);
+    setShowRubricManager(false);
+    setActiveRightPanel('rubric');
+  };
+
+  const handleRubricAnalysisUpdate = (feedback: RubricFeedback) => {
+    setRubricFeedback(feedback);
+  };
+
   if (isAuthLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -503,7 +521,13 @@ const DocumentEditor: React.FC = () => {
                 </span>
               )}
               
-
+              <button
+                onClick={() => setShowRubricManager(true)}
+                className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Rubrics
+              </button>
               
               <button
                 onClick={handleSave}
@@ -582,18 +606,99 @@ const DocumentEditor: React.FC = () => {
             />
           </div>
 
-          {/* Suggestions Panel - Fixed width */}
+          {/* Right Panel - Fixed width */}
           <div className="hidden lg:block w-80 flex-shrink-0">
-            {user?.uid && <SuggestionsPanel
-              documentId={currentDocumentId || documentId || ''}
-              userId={user.uid}
-              onSuggestionSelect={handleSuggestionSelect}
-              onSuggestionAccept={handleSuggestionAccept}
-              onToggleHighlights={handleToggleHighlights}
-            />}
+            {user?.uid && (
+              <div className="bg-white rounded-lg shadow-sm border h-fit min-h-[600px]">
+                {/* Panel Toggle */}
+                <div className="flex border-b">
+                  <button
+                    onClick={() => setActiveRightPanel('suggestions')}
+                    className={`flex-1 px-4 py-2 text-sm font-medium ${
+                      activeRightPanel === 'suggestions'
+                        ? 'text-blue-600 border-b-2 border-blue-600'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Suggestions
+                  </button>
+                  <button
+                    onClick={() => setActiveRightPanel('rubric')}
+                    className={`flex-1 px-4 py-2 text-sm font-medium ${
+                      activeRightPanel === 'rubric'
+                        ? 'text-blue-600 border-b-2 border-blue-600'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Rubric
+                  </button>
+                </div>
+
+                {/* Panel Content */}
+                {activeRightPanel === 'suggestions' && (
+                  <SuggestionsPanel
+                    documentId={currentDocumentId || documentId || ''}
+                    userId={user.uid}
+                    onSuggestionSelect={handleSuggestionSelect}
+                    onSuggestionAccept={handleSuggestionAccept}
+                    onToggleHighlights={handleToggleHighlights}
+                  />
+                )}
+
+                {activeRightPanel === 'rubric' && (
+                  <>
+                    {selectedRubric ? (
+                      <RubricFeedbackPanel
+                        documentId={currentDocumentId || documentId || ''}
+                        content={documentContent}
+                        selectedRubric={selectedRubric}
+                      />
+                    ) : (
+                      <div className="p-6 text-center text-gray-500">
+                        <FileText className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                        <p className="text-lg font-medium mb-2">No rubric selected</p>
+                        <p className="text-sm mb-4">Add a rubric to get assignment-specific feedback</p>
+                        <button
+                          onClick={() => setShowRubricManager(true)}
+                          className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                        >
+                          <FileText className="w-4 h-4 mr-2" />
+                          Manage Rubrics
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Rubric Manager Modal */}
+      {showRubricManager && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+              <div 
+                className="absolute inset-0 bg-gray-500 opacity-75"
+                onClick={() => setShowRubricManager(false)}
+              ></div>
+            </div>
+
+            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+
+            <div className="inline-block align-bottom bg-white rounded-lg text-left shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-4xl sm:w-full max-h-[90vh] overflow-y-auto">
+              <RubricManager
+                documentId={currentDocumentId || documentId || ''}
+                userId={user?.uid || ''}
+                onRubricSelect={handleRubricSelect}
+                onClose={() => setShowRubricManager(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

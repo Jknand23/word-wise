@@ -1,7 +1,7 @@
 import { collection, updateDoc, deleteDoc, doc, getDocs, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../lib/firebase';
-import type { Suggestion, SuggestionRequest, SuggestionResponse, StructureAnalysisRequest, StructureAnalysisResponse, EssayStructure } from '../types/suggestion';
+import type { Suggestion, SuggestionRequest, SuggestionResponse, StructureAnalysisRequest, StructureAnalysisResponse, EssayStructure, RubricAnalysisRequest, RubricAnalysisResponse } from '../types/suggestion';
 import { modificationTrackingService } from './modificationTrackingService';
 import { useWritingGoalsStore } from '../store/writingGoalsStore';
 

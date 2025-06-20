@@ -132,3 +132,88 @@ export interface ModifiedArea {
   lastModified: Date;
   suggestionIds: string[];
 }
+
+// Rubric-based feedback types
+export interface RubricLevel {
+  id: string;
+  score: number;
+  description: string;
+}
+
+export interface RubricCriterion {
+  id: string;
+  name: string;
+  description: string;
+  maxScore: number;
+  weight: number; // 0-1, how important this criterion is
+  levels: RubricLevel[]; // Scoring levels (e.g., Excellent=4, Good=3, Fair=2, Poor=1)
+  expectedElements: string[];
+  examples?: string[];
+  requiredCount?: number; // For things like "minimum 3 citations"
+  type: 'count' | 'quality' | 'presence' | 'structure' | 'tone' | 'length';
+}
+
+export interface AssignmentRubric {
+  id: string;
+  documentId: string;
+  userId: string;
+  title: string;
+  rawText?: string;
+  isStructured: boolean;
+  totalPoints?: number;
+  assignmentType: 'essay' | 'reflection' | 'report' | 'research-paper' | 'creative-writing' | 'other';
+  criteria: RubricCriterion[];
+  extractedRequirements: {
+    wordCount?: { min?: number; max?: number };
+    citationCount?: { min?: number; style?: 'APA' | 'MLA' | 'Chicago' | 'Harvard' };
+    structure?: string[];
+    tone?: string;
+    format?: string;
+    dueDate?: Date;
+  };
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface RubricAnalysisResult {
+  criterionId: string;
+  score: number; // 0-1, how well the writing meets this criterion
+  feedback: string;
+  specificIssues: {
+    type: 'missing' | 'insufficient' | 'incorrect' | 'needs-improvement';
+    description: string;
+    location?: { startIndex: number; endIndex: number };
+    suggestion?: string;
+  }[];
+  metExpectations: string[];
+  missedExpectations: string[];
+}
+
+export interface RubricFeedback {
+  id: string;
+  documentId: string;
+  userId: string;
+  rubricId: string;
+  overallScore: number; // 0-1
+  overallFeedback: string;
+  criteriaResults: RubricAnalysisResult[];
+  suggestions: Suggestion[]; // Rubric-specific suggestions
+  analysisId: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface RubricAnalysisRequest {
+  content: string;
+  documentId: string;
+  userId: string;
+  rubricId: string;
+  rubric: AssignmentRubric;
+}
+
+export interface RubricAnalysisResponse {
+  feedback: RubricFeedback;
+  suggestions: Suggestion[];
+  analysisId: string;
+  processingTime: number;
+}

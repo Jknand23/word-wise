@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 
 export type AcademicLevel = 'middle-school' | 'high-school' | 'undergrad';
-export type AssignmentType = 'essay' | 'reflection' | 'report';
+export type AssignmentType = 'essay' | 'reflection' | 'report' | 'research-paper' | 'creative-writing' | 'other';
 
 export interface WritingGoals {
   academicLevel: AcademicLevel;
@@ -87,6 +87,18 @@ export const useWritingGoalsStore = create<WritingGoalsState>()(
           
           if (assignmentType === 'report') {
             return 'Objective and factual, using clear and direct language';
+          }
+          
+          if (assignmentType === 'research-paper') {
+            return 'Academic and scholarly, with evidence-based arguments and proper citations';
+          }
+          
+          if (assignmentType === 'creative-writing') {
+            return 'Creative and expressive, focusing on narrative voice and style';
+          }
+          
+          if (assignmentType === 'other') {
+            return 'Appropriate to assignment requirements and audience';
           }
           
           // Essay tone varies by academic level

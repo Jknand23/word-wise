@@ -1,24 +1,29 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Share2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Save, Share2, AlertCircle, LayoutGrid, PanelRight } from 'lucide-react';
 import TextEditor from '../components/ai/TextEditor';
 import SuggestionsPanel from '../components/ai/SuggestionsPanel';
+import StructureSidebar from '../components/ai/StructureSidebar';
 import { useAuthStore } from '../store/authStore';
 import { useSuggestionStore } from '../stores/suggestionStore';
+import { useWritingGoalsStore } from '../store/writingGoalsStore';
 import { documentService } from '../services/documentService';
-import type { Suggestion } from '../types/suggestion';
+import type { Suggestion, EssaySection } from '../types/suggestion';
 
 const DocumentEditor: React.FC = () => {
   const { documentId } = useParams<{ documentId: string }>();
   const navigate = useNavigate();
   const { user, isLoading: isAuthLoading } = useAuthStore();
   const { setActiveDocument, clearSuggestions, error: suggestionError, setError, suggestions, rejectSuggestion, requestAnalysis } = useSuggestionStore();
+  const { goals } = useWritingGoalsStore();
   const [documentTitle, setDocumentTitle] = useState('Untitled Document');
   const [documentContent, setDocumentContent] = useState('');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedSuggestion, setSelectedSuggestion] = useState<Suggestion | null>(null);
   const [highlightsVisible, setHighlightsVisible] = useState<boolean>(true);
+
+  const [selectedSection, setSelectedSection] = useState<EssaySection | null>(null);
   
   // Track the current document ID - this will be updated when a new document is created
   const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
@@ -382,6 +387,81 @@ const DocumentEditor: React.FC = () => {
     setHighlightsVisible(visible);
   };
 
+
+
+  const handleSectionClick = (section: EssaySection) => {
+    console.log('🎯 Section clicked:', section);
+    console.log('🎯 Section indices:', section.startIndex, '-', section.endIndex);
+    console.log('🎯 Expected text:', section.text);
+    console.log('🎯 Current document content length:', documentContent.length);
+    
+    setSelectedSection(section);
+    
+    // Check if the section text still matches the current content
+    if (section.startIndex !== undefined && section.endIndex !== undefined) {
+      const currentTextAtIndices = documentContent.slice(section.startIndex, section.endIndex);
+      console.log('🎯 Current text at indices:', currentTextAtIndices);
+      console.log('🎯 Texts match:', currentTextAtIndices === section.text);
+      
+      // If the text doesn't match, try to find it in the current content
+      if (currentTextAtIndices !== section.text) {
+        console.log('🎯 Text mismatch detected, searching for correct position...');
+        
+        // Try to find the section text in the current content
+        const searchText = section.text.trim();
+        const foundIndex = documentContent.indexOf(searchText);
+        
+        if (foundIndex !== -1) {
+          console.log('🎯 Found text at new position:', foundIndex, '-', foundIndex + searchText.length);
+          
+          const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
+          if (textarea) {
+            textarea.focus();
+            textarea.setSelectionRange(foundIndex, foundIndex + searchText.length);
+            textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        } else {
+          console.log('🎯 Could not find section text in current content');
+          // Try partial matching with first 50 characters
+          const partialText = searchText.substring(0, 50);
+          const partialIndex = documentContent.indexOf(partialText);
+          
+          if (partialIndex !== -1) {
+            console.log('🎯 Found partial match at:', partialIndex);
+            const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
+            if (textarea) {
+              textarea.focus();
+              textarea.setSelectionRange(partialIndex, partialIndex + partialText.length);
+              textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }
+        }
+      } else {
+        // Text matches, use original indices
+        const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
+        if (textarea) {
+          textarea.focus();
+          textarea.setSelectionRange(section.startIndex, section.endIndex);
+          textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    }
+  };
+
+  const handleStructureAnalysisComplete = () => {
+    // Refresh suggestions after structure analysis to include new structure suggestions
+    if (user?.uid && currentDocumentId && documentContent.trim()) {
+      requestAnalysis({
+        content: documentContent,
+        documentId: currentDocumentId,
+        userId: user.uid,
+        analysisType: 'incremental'
+      }).catch(error => {
+        console.error('Failed to refresh suggestions after structure analysis:', error);
+      });
+    }
+  };
+
   if (isAuthLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -422,6 +502,8 @@ const DocumentEditor: React.FC = () => {
                   Last saved: {lastSaved.toLocaleTimeString()}
                 </span>
               )}
+              
+
               
               <button
                 onClick={handleSave}
@@ -471,10 +553,25 @@ const DocumentEditor: React.FC = () => {
       )}
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Text Editor - Takes up 2 columns on large screens */}
-          <div className="lg:col-span-2">
+      <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="flex gap-6">
+          {/* Left sidebar space - Always reserved for consistent positioning */}
+          <div className="hidden lg:block w-80 flex-shrink-0">
+            {goals.assignmentType === 'essay' && user?.uid && (
+              <div className="bg-white rounded-lg shadow-sm border h-fit min-h-[600px]">
+                <StructureSidebar
+                  documentId={currentDocumentId || documentId || ''}
+                  userId={user.uid}
+                  content={documentContent}
+                  onSectionClick={handleSectionClick}
+                  onRequestAnalysis={handleStructureAnalysisComplete}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Text Editor - Fixed width container */}
+          <div className="flex-1 max-w-4xl">
             <TextEditor 
               documentId={currentDocumentId || documentId || ''}
               userId={user?.uid}
@@ -485,8 +582,8 @@ const DocumentEditor: React.FC = () => {
             />
           </div>
 
-          {/* Suggestions Panel - Takes up 1 column on large screens */}
-          <div className="lg:col-span-1">
+          {/* Suggestions Panel - Fixed width */}
+          <div className="hidden lg:block w-80 flex-shrink-0">
             {user?.uid && <SuggestionsPanel
               documentId={currentDocumentId || documentId || ''}
               userId={user.uid}

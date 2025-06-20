@@ -127,6 +127,22 @@ Try typing some text with intentional errors to see the AI suggestions in action
                   <div className="w-3 h-3 bg-orange-200 border border-orange-400 rounded"></div>
                   <span className="text-gray-600">Grammar</span>
                 </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <div className="w-3 h-3 bg-purple-200 border border-purple-400 rounded"></div>
+                  <span className="text-gray-600">Tone</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <div className="w-3 h-3 bg-green-200 border border-green-400 rounded"></div>
+                  <span className="text-gray-600">Structure</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <div className="w-3 h-3 bg-indigo-200 border border-indigo-400 rounded"></div>
+                  <span className="text-gray-600">Depth</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <div className="w-3 h-3 bg-pink-200 border border-pink-400 rounded"></div>
+                  <span className="text-gray-600">Vocabulary</span>
+                </div>
               </div>
               <div className="text-xs text-gray-500">
                 Epic 3: AI Suggestions System

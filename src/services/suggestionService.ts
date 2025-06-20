@@ -1,8 +1,9 @@
 import { collection, updateDoc, deleteDoc, doc, getDocs, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../lib/firebase';
-import type { Suggestion, SuggestionRequest, SuggestionResponse } from '../types/suggestion';
+import type { Suggestion, SuggestionRequest, SuggestionResponse, StructureAnalysisRequest, StructureAnalysisResponse, EssayStructure } from '../types/suggestion';
 import { modificationTrackingService } from './modificationTrackingService';
+import { useWritingGoalsStore } from '../store/writingGoalsStore';
 
 
 export const suggestionService = {
@@ -15,9 +16,25 @@ export const suggestionService = {
         request.userId
       );
 
+      // Get writing goals settings
+      const writingGoalsState = useWritingGoalsStore.getState();
+      const { goals, getGrammarStrictness, getVocabularyLevel, getToneRecommendation } = writingGoalsState;
+
+      const writingGoals = {
+        academicLevel: goals.academicLevel,
+        assignmentType: goals.assignmentType,
+        customInstructions: goals.customInstructions,
+        grammarStrictness: getGrammarStrictness(),
+        vocabularyLevel: getVocabularyLevel(),
+        toneRecommendation: getToneRecommendation()
+      };
+
+      console.log('📚 Writing Goals being sent to AI:', writingGoals);
+
       const enhancedRequest = {
         ...request,
-        previouslyModifiedAreas: modifiedAreas
+        previouslyModifiedAreas: modifiedAreas,
+        writingGoals
       };
 
       const functions = getFunctions();
@@ -26,6 +43,70 @@ export const suggestionService = {
       return result.data as SuggestionResponse;
     } catch (error) {
       console.error('Error requesting suggestions:', error);
+      throw error;
+    }
+  },
+
+  // Request essay structure analysis
+  async requestStructureAnalysis(request: StructureAnalysisRequest): Promise<StructureAnalysisResponse> {
+    try {
+      console.log('🏗️ Requesting structure analysis:', request);
+      console.log('🏗️ Request details:', {
+        contentLength: request.content.length,
+        documentId: request.documentId,
+        userId: request.userId,
+        assignmentType: request.assignmentType,
+        academicLevel: request.academicLevel
+      });
+
+      const functions = getFunctions();
+      const analyzeEssayStructure = httpsCallable(functions, 'analyzeEssayStructure');
+      
+      console.log('🏗️ Calling Firebase function...');
+      const result = await analyzeEssayStructure(request);
+      
+      console.log('🏗️ Structure analysis result:', result);
+      return result.data as StructureAnalysisResponse;
+    } catch (error) {
+      console.error('❌ Error requesting structure analysis:', error);
+      console.error('❌ Error type:', typeof error);
+      console.error('❌ Error constructor:', error?.constructor?.name);
+      
+      if (error && typeof error === 'object' && 'code' in error) {
+        console.error('❌ Firebase error code:', (error as any).code);
+        console.error('❌ Firebase error message:', (error as any).message);
+        console.error('❌ Firebase error details:', (error as any).details);
+      }
+      
+      throw error;
+    }
+  },
+
+  // Get latest structure analysis for a document
+  async getDocumentStructure(documentId: string, userId: string): Promise<EssayStructure | null> {
+    try {
+      const q = query(
+        collection(db, 'essayStructures'),
+        where('documentId', '==', documentId),
+        where('userId', '==', userId),
+        orderBy('createdAt', 'desc')
+      );
+      
+      const querySnapshot = await getDocs(q);
+      if (querySnapshot.empty) {
+        return null;
+      }
+
+      const doc = querySnapshot.docs[0];
+      const data = doc.data();
+      return {
+        ...data,
+        id: doc.id,
+        createdAt: data.createdAt?.toDate(),
+        updatedAt: data.updatedAt?.toDate(),
+      } as unknown as EssayStructure;
+    } catch (error) {
+      console.error('Error fetching document structure:', error);
       throw error;
     }
   },

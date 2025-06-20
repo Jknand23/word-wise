@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, XCircle, AlertTriangle, Lightbulb, Sparkles, Type, Loader, Eye, EyeOff } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, Lightbulb, Sparkles, Type, Loader, Eye, EyeOff, MessageSquare, Layout, Brain, BookOpen } from 'lucide-react';
 import { useSuggestionStore } from '../../stores/suggestionStore';
 import { modificationTrackingService } from '../../services/modificationTrackingService';
 import type { Suggestion, ModifiedArea } from '../../types/suggestion';
@@ -12,7 +12,7 @@ interface SuggestionsPanelProps {
   onToggleHighlights?: (visible: boolean) => void;
 }
 
-type TabType = 'correctness' | 'clarity' | 'engagement';
+type TabType = 'correctness' | 'clarity' | 'engagement' | 'advanced';
 
 const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({ 
   documentId, 
@@ -78,6 +78,14 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
         return <Sparkles {...iconProps} className="w-4 h-4 text-blue-500" />;
       case 'grammar':
         return <AlertTriangle {...iconProps} className="w-4 h-4 text-orange-500" />;
+      case 'tone':
+        return <MessageSquare {...iconProps} className="w-4 h-4 text-purple-500" />;
+      case 'structure':
+        return <Layout {...iconProps} className="w-4 h-4 text-green-500" />;
+      case 'depth':
+        return <Brain {...iconProps} className="w-4 h-4 text-indigo-500" />;
+      case 'vocabulary':
+        return <BookOpen {...iconProps} className="w-4 h-4 text-pink-500" />;
       default:
         return <Lightbulb {...iconProps} />;
     }
@@ -100,8 +108,12 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   const categorizedSuggestions = {
     correctness: filteredSuggestions.filter(s => s.type === 'grammar' || s.type === 'spelling'),
     clarity: filteredSuggestions.filter(s => s.type === 'clarity'),
-    engagement: filteredSuggestions.filter(s => s.type === 'engagement')
+    engagement: filteredSuggestions.filter(s => s.type === 'engagement'),
+    advanced: filteredSuggestions.filter(s => s.type === 'tone' || s.type === 'structure' || s.type === 'depth' || s.type === 'vocabulary')
   };
+
+  // Show structure suggestions count in the advanced tab
+  const structureSuggestionsCount = categorizedSuggestions.advanced.filter(s => s.type === 'structure').length;
 
   // Get the suggestions for the currently active tab
   const activeSuggestions = categorizedSuggestions[activeTab];
@@ -167,6 +179,8 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
         return <Lightbulb className="w-4 h-4" />;
       case 'engagement':
         return <Sparkles className="w-4 h-4" />;
+      case 'advanced':
+        return <Brain className="w-4 h-4" />;
     }
   };
 
@@ -178,6 +192,8 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
         return 'Clarity';
       case 'engagement':
         return 'Engagement';
+      case 'advanced':
+        return 'Advanced';
     }
   };
 
@@ -246,7 +262,7 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
       {/* Tabs */}
       <div className="border-b border-gray-200">
         <nav className="flex">
-          {(['correctness', 'clarity', 'engagement'] as TabType[]).map((tab) => {
+          {(['correctness', 'clarity', 'engagement', 'advanced'] as TabType[]).map((tab) => {
             const count = categorizedSuggestions[tab].length;
             const isActive = activeTab === tab;
             
@@ -285,6 +301,8 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
               {activeTab === 'correctness' && 'No grammar or spelling issues found'}
               {activeTab === 'clarity' && 'Your writing is clear and easy to understand'}
               {activeTab === 'engagement' && 'Your content is engaging as-is'}
+              {activeTab === 'advanced' && structureSuggestionsCount > 0 && 'Structure analysis complete - see suggestions below'}
+              {activeTab === 'advanced' && structureSuggestionsCount === 0 && 'Your writing meets the advanced criteria for tone, structure, depth, and vocabulary'}
             </p>
           </div>
         ) : (

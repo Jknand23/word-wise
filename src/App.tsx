@@ -8,6 +8,7 @@ import Dashboard from './components/dashboard/Dashboard';
 import Epic3Demo from './pages/Epic3Demo';
 import DocumentEditor from './pages/DocumentEditor';
 import MyDocuments from './pages/MyDocuments';
+import WritingGoals from './pages/WritingGoals';
 import { useAuthStore } from './store/authStore';
 
 function App() {
@@ -39,6 +40,12 @@ function App() {
             <Route path="/document/:documentId" element={
               <ProtectedRoute>
                 <DocumentEditor />
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/writing-goals" element={
+              <ProtectedRoute>
+                <WritingGoals />
               </ProtectedRoute>
             } />
             

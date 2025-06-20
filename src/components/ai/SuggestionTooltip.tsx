@@ -1,5 +1,5 @@
 import React from 'react';
-import { Type, AlertTriangle, Lightbulb, Sparkles } from 'lucide-react';
+import { Type, AlertTriangle, Lightbulb, Sparkles, MessageSquare, Layout, Brain, BookOpen } from 'lucide-react';
 import type { Suggestion } from '../../types/suggestion';
 
 interface SuggestionTooltipProps {
@@ -30,6 +30,14 @@ const SuggestionTooltip: React.FC<SuggestionTooltipProps> = ({
         return <Sparkles {...iconProps} className="w-4 h-4 text-blue-500" />;
       case 'grammar':
         return <AlertTriangle {...iconProps} className="w-4 h-4 text-orange-500" />;
+      case 'tone':
+        return <MessageSquare {...iconProps} className="w-4 h-4 text-purple-500" />;
+      case 'structure':
+        return <Layout {...iconProps} className="w-4 h-4 text-green-500" />;
+      case 'depth':
+        return <Brain {...iconProps} className="w-4 h-4 text-indigo-500" />;
+      case 'vocabulary':
+        return <BookOpen {...iconProps} className="w-4 h-4 text-pink-500" />;
       default:
         return <Lightbulb {...iconProps} />;
     }

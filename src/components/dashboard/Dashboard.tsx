@@ -60,6 +60,10 @@ const Dashboard = () => {
     navigate(`/document/${documentId}`);
   };
 
+  const handleWritingGoals = () => {
+    navigate('/writing-goals');
+  };
+
   const handleDeleteDocument = async (documentId: string, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent opening the document
     
@@ -234,21 +238,19 @@ const Dashboard = () => {
               </div>
             </div>
 
-            <div className="warm-card relative overflow-hidden">
-              <div className="absolute top-3 right-3 bg-gradient-to-r from-accent-blue to-accent-indigo text-white text-xs font-bold px-4 py-2 rounded-full shadow-lg border-2 border-white">
-                Feature in Development 🚀
-              </div>
+            <div className="card-interactive group" onClick={handleWritingGoals}>
               <div className="flex items-center justify-between mb-4">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-accent-blue to-accent-indigo p-3 text-white shadow-lg">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-accent-blue to-accent-indigo p-3 text-white shadow-lg group-hover:scale-110 transition-transform duration-200">
                   <Target className="h-6 w-6" />
                 </div>
+                <div className="success-badge">Personalize 🎯</div>
               </div>
               <h4 className="text-xl font-bold encouraging-text mb-2">Writing Goals</h4>
               <p className="text-gray-600 mb-4 encouraging-text">
-                Set daily writing targets, track your progress, and earn achievements as you develop your skills.
+                Set your academic level and assignment type to get personalized AI suggestions tailored to your needs.
               </p>
-              <div className="text-accent-blue font-medium">
-                Coming Soon ✨
+              <div className="text-accent-blue font-medium flex items-center">
+                Configure Now <span className="ml-2 transform group-hover:translate-x-1 transition-transform">→</span>
               </div>
             </div>
           </div>

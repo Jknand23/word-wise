@@ -282,15 +282,18 @@ const TextEditor: React.FC<TextEditorProps> = ({
       // Indices are stale, try to find the correct position
       const actualIndex = content.indexOf(suggestion.originalText);
       if (actualIndex !== -1) {
-        // Found the text at a different position
-        return {
-          ...suggestion,
-          startIndex: actualIndex,
-          endIndex: actualIndex + suggestion.originalText.length
-        };
+        // Found the text at a different position, but only use it if it's a reasonable match
+        const textLength = suggestion.originalText.length;
+        if (textLength > 0) {
+          return {
+            ...suggestion,
+            startIndex: actualIndex,
+            endIndex: actualIndex + textLength
+          };
+        }
       }
       
-      // Text not found, mark as invalid
+      // Text not found or invalid, mark as invalid
       return null;
     }).filter(s => s !== null) as Suggestion[];
 
@@ -304,21 +307,35 @@ const TextEditor: React.FC<TextEditorProps> = ({
         return; // Skip overlapping suggestions
       }
       
-      // Add text before suggestion
-      highlightedContent += content.slice(lastIndex, suggestion.startIndex);
+      // Validate indices are within content bounds
+      if (suggestion.startIndex >= content.length || suggestion.endIndex > content.length) {
+        return; // Skip out-of-bounds suggestions
+      }
       
-      // Add highlighted suggestion text
+      // Add text before suggestion (escape HTML to prevent XSS)
+      const beforeText = content.slice(lastIndex, suggestion.startIndex);
+      highlightedContent += escapeHtml(beforeText);
+      
+      // Add highlighted suggestion text (escape HTML to prevent XSS)
       const suggestionText = content.slice(suggestion.startIndex, suggestion.endIndex);
       const colorClass = getSuggestionHighlightColor(suggestion.type);
-      highlightedContent += `<span class="${colorClass}" data-suggestion-id="${suggestion.id}">${suggestionText}</span>`;
+      highlightedContent += `<span class="${colorClass}" data-suggestion-id="${suggestion.id}">${escapeHtml(suggestionText)}</span>`;
       
       lastIndex = suggestion.endIndex;
     });
 
-    // Add remaining text
-    highlightedContent += content.slice(lastIndex);
+    // Add remaining text (escape HTML to prevent XSS)
+    const remainingText = content.slice(lastIndex);
+    highlightedContent += escapeHtml(remainingText);
     
     return highlightedContent;
+  };
+
+  // Helper function to escape HTML characters
+  const escapeHtml = (text: string) => {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   };
 
   const getSuggestionHighlightColor = (type: Suggestion['type']) => {
@@ -331,6 +348,14 @@ const TextEditor: React.FC<TextEditorProps> = ({
         return 'bg-blue-200 bg-opacity-30 border-b-2 border-blue-400 cursor-pointer hover:bg-opacity-50';
       case 'grammar':
         return 'bg-orange-200 bg-opacity-30 border-b-2 border-orange-400 cursor-pointer hover:bg-opacity-50';
+      case 'tone':
+        return 'bg-purple-200 bg-opacity-30 border-b-2 border-purple-400 cursor-pointer hover:bg-opacity-50';
+      case 'structure':
+        return 'bg-green-200 bg-opacity-30 border-b-2 border-green-400 cursor-pointer hover:bg-opacity-50';
+      case 'depth':
+        return 'bg-indigo-200 bg-opacity-30 border-b-2 border-indigo-400 cursor-pointer hover:bg-opacity-50';
+      case 'vocabulary':
+        return 'bg-pink-200 bg-opacity-30 border-b-2 border-pink-400 cursor-pointer hover:bg-opacity-50';
       default:
         return 'bg-gray-200 bg-opacity-30 border-b-2 border-gray-400 cursor-pointer hover:bg-opacity-50';
     }
@@ -374,15 +399,17 @@ const TextEditor: React.FC<TextEditorProps> = ({
       <div className="flex-1 relative">
         {/* Background highlighting layer */}
         <div 
-          className="absolute inset-4 text-transparent whitespace-pre-wrap break-words overflow-hidden select-none"
+          className="absolute top-4 left-4 right-4 bottom-4 text-transparent whitespace-pre-wrap break-words overflow-hidden select-none pointer-events-none"
           style={{
-            fontFamily: 'inherit',
-            fontSize: 'inherit',
-            lineHeight: 'inherit',
+            fontFamily: 'Inter, system-ui, sans-serif',
+            fontSize: '16px',
+            lineHeight: '1.6',
             padding: '0',
+            margin: '0',
             border: 'none',
-            pointerEvents: 'none',
             zIndex: 1,
+            wordWrap: 'break-word',
+            overflowWrap: 'break-word',
           }}
           dangerouslySetInnerHTML={{ __html: renderHighlightedText() }}
         />
@@ -394,12 +421,15 @@ const TextEditor: React.FC<TextEditorProps> = ({
           onChange={(e) => handleContentChange(e.target.value)}
           onClick={handleTextareaClick}
           placeholder="Start writing your document here..."
-          className="w-full h-full p-4 resize-none border-none outline-none bg-transparent relative z-2"
+          className="w-full h-full p-4 resize-none border-none outline-none bg-transparent relative"
           style={{
             minHeight: 'calc(100vh - 200px)',
             fontFamily: 'Inter, system-ui, sans-serif',
             fontSize: '16px',
             lineHeight: '1.6',
+            zIndex: 2,
+            wordWrap: 'break-word',
+            overflowWrap: 'break-word',
           }}
         />
       </div>

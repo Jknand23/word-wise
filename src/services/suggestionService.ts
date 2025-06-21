@@ -1,8 +1,9 @@
 import { collection, updateDoc, deleteDoc, doc, getDocs, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../lib/firebase';
-import type { Suggestion, SuggestionRequest, SuggestionResponse, StructureAnalysisRequest, StructureAnalysisResponse, EssayStructure, RubricAnalysisRequest, RubricAnalysisResponse } from '../types/suggestion';
+import type { Suggestion, SuggestionRequest, SuggestionResponse, StructureAnalysisRequest, StructureAnalysisResponse, EssayStructure } from '../types/suggestion';
 import { modificationTrackingService } from './modificationTrackingService';
+import { paragraphTagService } from './paragraphTagService';
 import { useWritingGoalsStore } from '../store/writingGoalsStore';
 
 
@@ -13,6 +14,12 @@ export const suggestionService = {
       // Get previously modified areas to include in the request
       const modifiedAreas = await modificationTrackingService.getModifiedAreas(
         request.documentId, 
+        request.userId
+      );
+
+      // Get paragraph tags to exclude "Done" paragraphs from AI analysis
+      const paragraphTags = await paragraphTagService.getDocumentTags(
+        request.documentId,
         request.userId
       );
 
@@ -34,7 +41,8 @@ export const suggestionService = {
       const enhancedRequest = {
         ...request,
         previouslyModifiedAreas: modifiedAreas,
-        writingGoals
+        writingGoals,
+        paragraphTags
       };
 
       const functions = getFunctions();

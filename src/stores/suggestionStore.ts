@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import type { Suggestion, SuggestionRequest } from '../types/suggestion';
+import type { Suggestion, SuggestionRequest, ParagraphTag } from '../types/suggestion';
 import { suggestionService } from '../services/suggestionService';
 import { modificationTrackingService } from '../services/modificationTrackingService';
+import { paragraphTagService } from '../services/paragraphTagService';
 
 interface SuggestionStore {
   // State
@@ -23,6 +24,7 @@ interface SuggestionStore {
   subscribeToDocument: (documentId: string, userId: string) => () => void;
   clearSuggestions: () => void;
   setError: (error: string | null) => void;
+  getFilteredSuggestions: (content: string, paragraphTags: ParagraphTag[]) => Suggestion[];
 }
 
 export const useSuggestionStore = create<SuggestionStore>()(
@@ -202,6 +204,35 @@ export const useSuggestionStore = create<SuggestionStore>()(
       // Set error
       setError: (error: string | null) => {
         set({ error });
+      },
+
+      // Filter suggestions to exclude those from "Done" paragraphs
+      getFilteredSuggestions: (content: string, paragraphTags: ParagraphTag[]) => {
+        const { suggestions } = get();
+        
+        if (!content || paragraphTags.length === 0) {
+          return suggestions;
+        }
+
+        // Get paragraph boundaries
+        const paragraphs = paragraphTagService.extractParagraphs(content);
+        const doneParagraphs = paragraphTags
+          .filter(tag => tag.tagType === 'done')
+          .map(tag => tag.paragraphIndex);
+
+        // Filter out suggestions that fall within "Done" paragraphs
+        return suggestions.filter(suggestion => {
+          for (let i = 0; i < paragraphs.length; i++) {
+            if (doneParagraphs.includes(i)) {
+              const paragraph = paragraphs[i];
+              if (suggestion.startIndex >= paragraph.startIndex && 
+                  suggestion.endIndex <= paragraph.endIndex) {
+                return false; // This suggestion is in a "Done" paragraph
+              }
+            }
+          }
+          return true; // This suggestion is not in a "Done" paragraph
+        });
       },
 
 

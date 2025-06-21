@@ -54,6 +54,8 @@ export default {
           sage: '#84cc16',
           ocean: '#0891b2',
           forest: '#059669',
+          gold: '#f59e0b',
+          coral: '#f97316',
         },
         // Modern gradient colors - neutral tones
         gradient: {

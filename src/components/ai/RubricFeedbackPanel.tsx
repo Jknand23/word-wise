@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, AlertCircle, XCircle, TrendingUp, TrendingDown, Target, Lightbulb, Loader, Play, AlertTriangle, Info } from 'lucide-react';
+import { CheckCircle, AlertCircle, XCircle, TrendingUp, Target, Lightbulb, Loader, Info } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { rubricService } from '../../services/rubricService';
 import { useWritingGoalsStore } from '../../store/writingGoalsStore';

@@ -1,23 +1,15 @@
 {
   "indexes": [
     {
-      "collectionGroup": "suggestions",
+      "collectionGroup": "documents",
       "queryScope": "COLLECTION",
       "fields": [
-        {
-          "fieldPath": "documentId",
-          "order": "ASCENDING"
-        },
         {
           "fieldPath": "userId",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "startIndex",
+          "fieldPath": "createdAt",
           "order": "ASCENDING"
         }
       ]
@@ -37,29 +29,7 @@
       ]
     },
     {
-      "collectionGroup": "modifiedAreas",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "documentId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "userId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "lastModified",
-          "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "__name__",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "rubrics",
+      "collectionGroup": "essayStructures",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -73,9 +43,23 @@
         {
           "fieldPath": "createdAt",
           "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "modifiedAreas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "documentId",
+          "order": "ASCENDING"
         },
         {
-          "fieldPath": "__name__",
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lastModified",
           "order": "DESCENDING"
         }
       ]
@@ -95,15 +79,11 @@
         {
           "fieldPath": "createdAt",
           "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "__name__",
-          "order": "DESCENDING"
         }
       ]
     },
     {
-      "collectionGroup": "essayStructures",
+      "collectionGroup": "rubrics",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -117,10 +97,28 @@
         {
           "fieldPath": "createdAt",
           "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "suggestions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "documentId",
+          "order": "ASCENDING"
         },
         {
-          "fieldPath": "__name__",
-          "order": "DESCENDING"
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startIndex",
+          "order": "ASCENDING"
         }
       ]
     }

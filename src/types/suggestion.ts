@@ -96,6 +96,7 @@ export interface SuggestionRequest {
   analysisType?: 'full' | 'incremental';
   previouslyModifiedAreas?: ModifiedArea[];
   writingGoals?: WritingGoalsConfig;
+  paragraphTags?: ParagraphTag[]; // Include paragraph tags to exclude "Done" paragraphs
 }
 
 export interface SuggestionResponse {
@@ -216,4 +217,39 @@ export interface RubricAnalysisResponse {
   suggestions: Suggestion[];
   analysisId: string;
   processingTime: number;
+}
+
+// Paragraph tagging interfaces
+export interface ParagraphTag {
+  id: string;
+  documentId: string;
+  userId: string;
+  paragraphIndex: number;
+  startIndex: number;
+  endIndex: number;
+  text: string; // The actual paragraph text (for validation)
+  tagType: 'needs-review' | 'done';
+  note?: string; // Optional user note
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ParagraphTagData {
+  documentId: string;
+  userId: string;
+  paragraphIndex: number;
+  startIndex: number;
+  endIndex: number;
+  text: string;
+  tagType: 'needs-review' | 'done';
+  note?: string;
+  createdAt: any; // Firestore timestamp
+  updatedAt: any; // Firestore timestamp
+}
+
+export interface TaggingState {
+  tags: ParagraphTag[];
+  filteredByTag: 'all' | 'needs-review' | 'done' | null;
+  isLoading: boolean;
+  error: string | null;
 }

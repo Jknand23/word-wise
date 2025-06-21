@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, FileText, Trash2, Edit3, CheckCircle, AlertCircle, Loader, Edit } from 'lucide-react';
+import { X, Plus, FileText, Trash2, CheckCircle, AlertCircle, Loader, Edit } from 'lucide-react';
 import { rubricService } from '../../services/rubricService';
 import StructuredRubricForm from './StructuredRubricForm';
 import type { AssignmentRubric, RubricCriterion } from '../../types/suggestion';
@@ -320,7 +320,7 @@ const RubricManager: React.FC<RubricManagerProps> = ({
                         {rubric.assignmentType}
                       </span>
                       <span className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded">
-                        {rubric.academicLevel}
+                        Grade Level
                       </span>
                     </div>
                   </div>

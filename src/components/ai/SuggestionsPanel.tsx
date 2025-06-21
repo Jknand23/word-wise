@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { CheckCircle, XCircle, AlertTriangle, Lightbulb, Sparkles, Type, Loader, Eye, EyeOff, MessageSquare, Layout, Brain, BookOpen } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { CheckCircle, XCircle, AlertTriangle, Lightbulb, Sparkles, Type, Loader, Eye, EyeOff, MessageSquare, Layout, Brain, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useSuggestionStore } from '../../stores/suggestionStore';
+import { useParagraphTagStore } from '../../stores/paragraphTagStore';
 import { modificationTrackingService } from '../../services/modificationTrackingService';
 import type { Suggestion, ModifiedArea } from '../../types/suggestion';
 
 interface SuggestionsPanelProps {
   documentId: string;
   userId: string;
+  content?: string; // Add content prop to enable paragraph tag filtering
   onSuggestionSelect?: (suggestion: Suggestion) => void;
   onSuggestionAccept?: (suggestion: Suggestion) => void;
   onToggleHighlights?: (visible: boolean) => void;
@@ -17,6 +19,7 @@ type TabType = 'correctness' | 'clarity' | 'engagement' | 'advanced';
 const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({ 
   documentId, 
   userId,
+  content = '',
   onSuggestionSelect,
   onSuggestionAccept,
   onToggleHighlights
@@ -24,6 +27,9 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   const [activeTab, setActiveTab] = useState<TabType>('correctness');
   const [modifiedAreas, setModifiedAreas] = useState<ModifiedArea[]>([]);
   const [highlightsVisible, setHighlightsVisible] = useState<boolean>(true);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const tabsScrollRef = useRef<HTMLDivElement>(null);
   
   const {
     suggestions,
@@ -32,7 +38,10 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
     error,
     acceptSuggestion,
     rejectSuggestion,
+    getFilteredSuggestions,
   } = useSuggestionStore();
+
+  const { tags } = useParagraphTagStore();
 
   // Load modified areas for filtering
   useEffect(() => {
@@ -46,8 +55,11 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
     }
   }, [documentId, userId, suggestions.length]); // Refresh when suggestions change
 
-  // Filter suggestions to exclude over-modified areas
-  const filteredSuggestions = suggestions.filter(suggestion => {
+  // First filter suggestions to exclude those from "Done" paragraphs
+  const paragraphFilteredSuggestions = getFilteredSuggestions(content, tags);
+
+  // Then filter to exclude over-modified areas
+  const filteredSuggestions = paragraphFilteredSuggestions.filter(suggestion => {
     if (suggestion.type !== 'clarity' && suggestion.type !== 'engagement') {
       return true; // Always allow spelling/grammar
     }
@@ -171,6 +183,37 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
     }
   };
 
+  // Check scroll position and update navigation arrows
+  const checkScrollPosition = () => {
+    if (tabsScrollRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = tabsScrollRef.current;
+      setCanScrollLeft(scrollLeft > 0);
+      setCanScrollRight(scrollLeft < scrollWidth - clientWidth);
+    }
+  };
+
+  // Scroll tabs left
+  const scrollTabsLeft = () => {
+    if (tabsScrollRef.current) {
+      tabsScrollRef.current.scrollBy({ left: -100, behavior: 'smooth' });
+    }
+  };
+
+  // Scroll tabs right
+  const scrollTabsRight = () => {
+    if (tabsScrollRef.current) {
+      tabsScrollRef.current.scrollBy({ left: 100, behavior: 'smooth' });
+    }
+  };
+
+  // Check scroll position on mount and when tabs change
+  useEffect(() => {
+    checkScrollPosition();
+    const handleResize = () => checkScrollPosition();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [categorizedSuggestions]);
+
   const getTabIcon = (tab: TabType) => {
     switch (tab) {
       case 'correctness':
@@ -260,36 +303,67 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
       )}
 
       {/* Tabs */}
-      <div className="border-b border-gray-200">
-        <nav className="flex">
-          {(['correctness', 'clarity', 'engagement', 'advanced'] as TabType[]).map((tab) => {
-            const count = categorizedSuggestions[tab].length;
-            const isActive = activeTab === tab;
-            
-            return (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex-1 flex items-center justify-center gap-1 px-2 py-3 text-xs font-medium border-b-2 transition-colors ${
-                  isActive
-                    ? 'border-blue-500 text-blue-600 bg-blue-50'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                {getTabIcon(tab)}
-                <span className="hidden sm:inline">{getTabLabel(tab)}</span>
-                <span className="sm:hidden">{getTabLabel(tab).slice(0, 4)}</span>
-                <span className={`inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold rounded-full ${
-                  isActive
-                    ? 'bg-blue-100 text-blue-800'
-                    : 'bg-gray-100 text-gray-800'
-                }`}>
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </nav>
+      <div className="border-b border-gray-200 flex-shrink-0">
+        <div className="relative flex items-center">
+          {/* Left scroll arrow */}
+          {canScrollLeft && (
+            <button
+              onClick={scrollTabsLeft}
+              className="absolute left-0 z-10 flex items-center justify-center w-8 h-full bg-gradient-to-r from-white to-transparent hover:from-gray-50"
+              aria-label="Scroll tabs left"
+            >
+              <ChevronLeft className="w-4 h-4 text-gray-600" />
+            </button>
+          )}
+          
+          {/* Scrollable tabs container */}
+          <div 
+            ref={tabsScrollRef}
+            className="overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 flex-1"
+            onScroll={checkScrollPosition}
+          >
+            <nav className="flex min-w-max">
+              {(['correctness', 'clarity', 'engagement', 'advanced'] as TabType[]).map((tab) => {
+                const count = categorizedSuggestions[tab].length;
+                const isActive = activeTab === tab;
+                
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`flex items-center justify-center gap-1 px-4 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap min-w-[80px] ${
+                      isActive
+                        ? 'border-blue-500 text-blue-600 bg-blue-50'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    {getTabIcon(tab)}
+                    <span className="hidden sm:inline">{getTabLabel(tab)}</span>
+                    <span className="sm:hidden">{getTabLabel(tab).slice(0, 4)}</span>
+                    <span className={`inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold rounded-full ml-1 ${
+                      isActive
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-gray-100 text-gray-800'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+          
+          {/* Right scroll arrow */}
+          {canScrollRight && (
+            <button
+              onClick={scrollTabsRight}
+              className="absolute right-0 z-10 flex items-center justify-center w-8 h-full bg-gradient-to-l from-white to-transparent hover:from-gray-50"
+              aria-label="Scroll tabs right"
+            >
+              <ChevronRight className="w-4 h-4 text-gray-600" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tab Content */}

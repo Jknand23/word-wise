@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Share2, AlertCircle, LayoutGrid, PanelRight, FileText } from 'lucide-react';
+import { ArrowLeft, Save, Share2, AlertCircle, FileText } from 'lucide-react';
 import TextEditor from '../components/ai/TextEditor';
 import SuggestionsPanel from '../components/ai/SuggestionsPanel';
 import StructureSidebar from '../components/ai/StructureSidebar';
 import RubricManager from '../components/ai/RubricManager';
 import RubricFeedbackPanel from '../components/ai/RubricFeedbackPanel';
+import ParagraphTaggingControls from '../components/ai/ParagraphTaggingControls';
 import { useAuthStore } from '../store/authStore';
 import { useSuggestionStore } from '../stores/suggestionStore';
 import { useWritingGoalsStore } from '../store/writingGoalsStore';
 import { documentService } from '../services/documentService';
+import { progressService } from '../services/progressService';
 import type { Suggestion, EssaySection, AssignmentRubric, RubricFeedback } from '../types/suggestion';
 
 const DocumentEditor: React.FC = () => {
@@ -61,6 +63,32 @@ const DocumentEditor: React.FC = () => {
     };
   }, [currentDocumentId, user?.uid, setActiveDocument]);
 
+  // Track quality metrics when new suggestions arrive
+  useEffect(() => {
+    if (user?.uid && currentDocumentId && suggestions.length > 0 && documentContent.trim()) {
+      const document = {
+        id: currentDocumentId,
+        wordCount: documentContent.trim().split(/\s+/).length,
+        createdAt: new Date(),
+        userId: user.uid,
+        title: documentTitle,
+        content: documentContent,
+        updatedAt: new Date()
+      };
+
+      const qualityMetrics = progressService.calculateQualityMetrics(document, suggestions);
+      
+      // Store quality metrics for progress tracking
+      progressService.storeQualityMetrics(user.uid, currentDocumentId, {
+        errorRate: qualityMetrics.errorRate,
+        suggestionDensity: qualityMetrics.suggestionDensity,
+        wordCount: qualityMetrics.wordCount
+      }).catch(error => {
+        console.error('Failed to store quality metrics:', error);
+      });
+    }
+  }, [suggestions, user?.uid, currentDocumentId, documentContent, documentTitle]);
+
   useEffect(() => {
     console.log('DocumentEditor useEffect triggered:', {
       documentId,
@@ -68,6 +96,8 @@ const DocumentEditor: React.FC = () => {
       userUid: user?.uid,
       justCreated: justCreatedRef.current
     });
+
+
 
     if (documentId === 'new') {
       console.log('Setting up new document - resetting title to "New Document"');
@@ -233,7 +263,14 @@ const DocumentEditor: React.FC = () => {
   };
 
   const handleSuggestionSelect = (suggestion: Suggestion) => {
+    console.log('Selecting suggestion:', suggestion);
     setSelectedSuggestion(suggestion);
+    
+    // Force a re-render to update highlights
+    setTimeout(() => {
+      // This small delay ensures the selection state has been processed
+      setDocumentContent(currentContent => currentContent);
+    }, 10);
   };
 
   const validateAndCleanSuggestions = async (currentContent: string) => {
@@ -395,64 +432,24 @@ const DocumentEditor: React.FC = () => {
     setHighlightsVisible(visible);
   };
 
-
+  const handleTagsChange = () => {
+    // Force re-render when tags change
+    console.log('Tags changed, forcing re-render');
+  };
 
   const handleSectionClick = (section: EssaySection) => {
-    console.log('🎯 Section clicked:', section);
-    console.log('🎯 Section indices:', section.startIndex, '-', section.endIndex);
-    console.log('🎯 Expected text:', section.text);
-    console.log('🎯 Current document content length:', documentContent.length);
-    
     setSelectedSection(section);
     
-    // Check if the section text still matches the current content
-    if (section.startIndex !== undefined && section.endIndex !== undefined) {
-      const currentTextAtIndices = documentContent.slice(section.startIndex, section.endIndex);
-      console.log('🎯 Current text at indices:', currentTextAtIndices);
-      console.log('🎯 Texts match:', currentTextAtIndices === section.text);
-      
-      // If the text doesn't match, try to find it in the current content
-      if (currentTextAtIndices !== section.text) {
-        console.log('🎯 Text mismatch detected, searching for correct position...');
-        
-        // Try to find the section text in the current content
-        const searchText = section.text.trim();
-        const foundIndex = documentContent.indexOf(searchText);
-        
-        if (foundIndex !== -1) {
-          console.log('🎯 Found text at new position:', foundIndex, '-', foundIndex + searchText.length);
-          
-          const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
-          if (textarea) {
-            textarea.focus();
-            textarea.setSelectionRange(foundIndex, foundIndex + searchText.length);
-            textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-        } else {
-          console.log('🎯 Could not find section text in current content');
-          // Try partial matching with first 50 characters
-          const partialText = searchText.substring(0, 50);
-          const partialIndex = documentContent.indexOf(partialText);
-          
-          if (partialIndex !== -1) {
-            console.log('🎯 Found partial match at:', partialIndex);
-            const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
-            if (textarea) {
-              textarea.focus();
-              textarea.setSelectionRange(partialIndex, partialIndex + partialText.length);
-              textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-          }
-        }
-      } else {
-        // Text matches, use original indices
-        const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
-        if (textarea) {
-          textarea.focus();
-          textarea.setSelectionRange(section.startIndex, section.endIndex);
-          textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }
+    // Calculate the position of the section in the document
+    const sectionStart = section.startIndex;
+    const sectionEnd = section.endIndex;
+    
+    // Focus on the text editor using a more general approach
+    const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
+    if (textarea) {
+      textarea.focus();
+      textarea.setSelectionRange(sectionStart, sectionEnd);
+      textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   };
 
@@ -489,59 +486,65 @@ const DocumentEditor: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="flex flex-col min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={handleBackToDashboard}
-                className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-              >
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Dashboard
-              </button>
-              
-              <div className="flex items-center space-x-2">
-                <input
-                  type="text"
-                  value={documentTitle}
-                  onChange={handleTitleChange}
-                  className="text-lg font-medium text-gray-900 bg-transparent border-none focus:outline-none focus:ring-0 max-w-md"
-                  placeholder="Document title..."
-                />
+      <header className="bg-white shadow-sm border-b flex-shrink-0">
+        <div className="w-full px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-center h-16">
+            <div className="flex justify-center gap-6 w-full max-w-none">
+              {/* Left section - aligned with Essay Structure panel */}
+              <div className="w-80 flex items-center justify-start flex-shrink-0">
+                <button
+                  onClick={handleBackToDashboard}
+                  className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+                >
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Back to Dashboard
+                </button>
               </div>
-            </div>
 
-            <div className="flex items-center space-x-4">
-              {lastSaved && (
-                <span className="text-sm text-gray-500">
-                  Last saved: {lastSaved.toLocaleTimeString()}
-                </span>
-              )}
-              
-              <button
-                onClick={() => setShowRubricManager(true)}
-                className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-              >
-                <FileText className="h-4 w-4 mr-2" />
-                Rubrics
-              </button>
-              
-              <button
-                onClick={handleSave}
-                disabled={isSaving}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50"
-              >
-                <Save className="h-4 w-4 mr-2" />
-                {isSaving ? 'Saving...' : 'Save'}
-              </button>
+              {/* Center section - aligned with Document Editor panel */}
+              <div className="w-[800px] flex items-center justify-center flex-shrink-0">
+                <div className="flex flex-col items-center">
+                  <input
+                    type="text"
+                    value={documentTitle}
+                    onChange={handleTitleChange}
+                    className="text-lg font-medium text-gray-900 bg-transparent border-none focus:outline-none focus:ring-0 text-center max-w-md"
+                    placeholder="Document title..."
+                  />
+                  {lastSaved && (
+                    <span className="text-xs text-gray-500 mt-1">
+                      Last saved: {lastSaved.toLocaleTimeString()}
+                    </span>
+                  )}
+                </div>
+              </div>
 
-              <button className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500">
-                <Share2 className="h-4 w-4 mr-2" />
-                Share
-              </button>
+              {/* Right section - aligned with AI Suggestions panel */}
+              <div className="w-80 flex items-center justify-end space-x-3 flex-shrink-0">
+                <button
+                  onClick={() => setShowRubricManager(true)}
+                  className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+                >
+                  <FileText className="h-4 w-4 mr-2" />
+                  Rubrics
+                </button>
+                
+                <button
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4 mr-2" />
+                  {isSaving ? 'Saving...' : 'Save'}
+                </button>
+
+                <button className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500">
+                  <Share2 className="h-4 w-4 mr-2" />
+                  Share
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -549,7 +552,7 @@ const DocumentEditor: React.FC = () => {
 
       {/* Error Banner */}
       {suggestionError && (
-        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 flex-shrink-0">
           <div className="flex">
             <div className="flex-shrink-0">
               <AlertCircle className="h-5 w-5 text-yellow-400" />
@@ -576,101 +579,117 @@ const DocumentEditor: React.FC = () => {
         </div>
       )}
 
-      {/* Main Content */}
-      <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="flex gap-6">
-          {/* Left sidebar space - Always reserved for consistent positioning */}
-          <div className="hidden lg:block w-80 flex-shrink-0">
-            {goals.assignmentType === 'essay' && user?.uid && (
-              <div className="bg-white rounded-lg shadow-sm border h-fit min-h-[600px]">
-                <StructureSidebar
-                  documentId={currentDocumentId || documentId || ''}
-                  userId={user.uid}
-                  content={documentContent}
-                  onSectionClick={handleSectionClick}
-                  onRequestAnalysis={handleStructureAnalysisComplete}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Text Editor - Fixed width container */}
-          <div className="flex-1 max-w-4xl">
-            <TextEditor 
-              documentId={currentDocumentId || documentId || ''}
-              userId={user?.uid}
-              initialContent={documentContent}
-              onContentChange={handleContentChange}
-              selectedSuggestion={selectedSuggestion}
-              highlightsVisible={highlightsVisible}
-            />
-          </div>
-
-          {/* Right Panel - Fixed width */}
-          <div className="hidden lg:block w-80 flex-shrink-0">
-            {user?.uid && (
-              <div className="bg-white rounded-lg shadow-sm border h-fit min-h-[600px]">
-                {/* Panel Toggle */}
-                <div className="flex border-b">
-                  <button
-                    onClick={() => setActiveRightPanel('suggestions')}
-                    className={`flex-1 px-4 py-2 text-sm font-medium ${
-                      activeRightPanel === 'suggestions'
-                        ? 'text-blue-600 border-b-2 border-blue-600'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    Suggestions
-                  </button>
-                  <button
-                    onClick={() => setActiveRightPanel('rubric')}
-                    className={`flex-1 px-4 py-2 text-sm font-medium ${
-                      activeRightPanel === 'rubric'
-                        ? 'text-blue-600 border-b-2 border-blue-600'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    Rubric
-                  </button>
-                </div>
-
-                {/* Panel Content */}
-                {activeRightPanel === 'suggestions' && (
-                  <SuggestionsPanel
+      {/* Main Content - Fixed height container */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="px-4 sm:px-6 lg:px-8 py-6 flex-1 flex flex-col">
+          <div className="flex justify-center gap-6 h-full overflow-hidden mb-4">
+            {/* Left sidebar - Essay Structure with expanded height */}
+            <div className="hidden lg:flex w-80 flex-shrink-0">
+              {goals.assignmentType === 'essay' && user?.uid && (
+                <div className="bg-white rounded-lg shadow-sm border flex flex-col w-full" style={{ height: 'calc(100vh - 120px)' }}>
+                  <StructureSidebar
                     documentId={currentDocumentId || documentId || ''}
                     userId={user.uid}
-                    onSuggestionSelect={handleSuggestionSelect}
-                    onSuggestionAccept={handleSuggestionAccept}
-                    onToggleHighlights={handleToggleHighlights}
+                    content={documentContent}
+                    onSectionClick={handleSectionClick}
+                    onRequestAnalysis={handleStructureAnalysisComplete}
                   />
-                )}
+                </div>
+              )}
+            </div>
 
-                {activeRightPanel === 'rubric' && (
-                  <>
-                    {selectedRubric ? (
-                      <RubricFeedbackPanel
-                        documentId={currentDocumentId || documentId || ''}
-                        content={documentContent}
-                        selectedRubric={selectedRubric}
-                      />
-                    ) : (
-                      <div className="p-6 text-center text-gray-500">
-                        <FileText className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                        <p className="text-lg font-medium mb-2">No rubric selected</p>
-                        <p className="text-sm mb-4">Add a rubric to get assignment-specific feedback</p>
-                        <button
-                          onClick={() => setShowRubricManager(true)}
-                          className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                        >
-                          <FileText className="w-4 h-4 mr-2" />
-                          Manage Rubrics
-                        </button>
-                      </div>
-                    )}
-                  </>
-                )}
+            {/* Text Editor - Fixed width and expanded height container */}
+            <div className="w-[800px] flex-shrink-0 flex flex-col overflow-hidden">
+              <div className="bg-white rounded-lg shadow-sm border flex flex-col" style={{ height: 'calc(100vh - 120px)' }}>
+                {/* Paragraph Tagging Controls */}
+                <div className="flex-shrink-0">
+                  <ParagraphTaggingControls />
+                </div>
+                
+                {/* Text Editor with scrolling */}
+                <div className="flex-1 overflow-y-auto">
+                  <TextEditor 
+                    documentId={currentDocumentId || documentId || ''}
+                    userId={user?.uid}
+                    initialContent={documentContent}
+                    onContentChange={handleContentChange}
+                    selectedSuggestion={selectedSuggestion}
+                    highlightsVisible={highlightsVisible}
+                    onTagsChange={handleTagsChange}
+                  />
+                </div>
               </div>
-            )}
+            </div>
+
+            {/* Right Panel - AI Suggestions with expanded height */}
+            <div className="hidden lg:flex w-80 flex-shrink-0">
+              {user?.uid && (
+                <div className="bg-white rounded-lg shadow-sm border flex flex-col w-full" style={{ height: 'calc(100vh - 120px)' }}>
+                  {/* Panel Toggle */}
+                  <div className="flex border-b flex-shrink-0">
+                    <button
+                      onClick={() => setActiveRightPanel('suggestions')}
+                      className={`flex-1 px-4 py-2 text-sm font-medium ${
+                        activeRightPanel === 'suggestions'
+                          ? 'text-blue-600 border-b-2 border-blue-600'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      Suggestions
+                    </button>
+                    <button
+                      onClick={() => setActiveRightPanel('rubric')}
+                      className={`flex-1 px-4 py-2 text-sm font-medium ${
+                        activeRightPanel === 'rubric'
+                          ? 'text-blue-600 border-b-2 border-blue-600'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      Rubric
+                    </button>
+                  </div>
+
+                  {/* Panel Content with scrolling */}
+                  <div className="flex-1 overflow-hidden">
+                    {activeRightPanel === 'suggestions' && (
+                      <SuggestionsPanel
+                        documentId={currentDocumentId || documentId || ''}
+                        userId={user.uid}
+                        content={documentContent}
+                        onSuggestionSelect={handleSuggestionSelect}
+                        onSuggestionAccept={handleSuggestionAccept}
+                        onToggleHighlights={handleToggleHighlights}
+                      />
+                    )}
+
+                    {activeRightPanel === 'rubric' && (
+                      <>
+                        {selectedRubric ? (
+                          <RubricFeedbackPanel
+                            documentId={currentDocumentId || documentId || ''}
+                            content={documentContent}
+                            selectedRubric={selectedRubric}
+                          />
+                        ) : (
+                          <div className="p-6 text-center text-gray-500 h-full flex flex-col justify-center">
+                            <FileText className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                            <p className="text-lg font-medium mb-2">No rubric selected</p>
+                            <p className="text-sm mb-4">Add a rubric to get assignment-specific feedback</p>
+                            <button
+                              onClick={() => setShowRubricManager(true)}
+                              className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                            >
+                              <FileText className="w-4 h-4 mr-2" />
+                              Manage Rubrics
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

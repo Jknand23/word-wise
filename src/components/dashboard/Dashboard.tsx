@@ -3,10 +3,14 @@ import { LogOut, FileText, User, Trash2, BookOpen, Target, Zap, TrendingUp, Spar
 import { useNavigate } from 'react-router-dom';
 import { authService } from '../../services/authService';
 import { useAuthStore } from '../../store/authStore';
+import { useProgressStore } from '../../stores/progressStore';
 import { documentService, type Document } from '../../services/documentService';
+import ProgressCards from './ProgressCards';
+import TestProgressButton from './TestProgressButton';
 
 const Dashboard = () => {
   const { user } = useAuthStore();
+  const { progressData, loadProgress, setWeeklyGoal } = useProgressStore();
   const navigate = useNavigate();
   const [recentDocuments, setRecentDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -15,8 +19,14 @@ const Dashboard = () => {
   useEffect(() => {
     if (user?.uid) {
       loadRecentActivity();
+      loadProgress(user.uid);
     }
-  }, [user?.uid]);
+  }, [user?.uid, loadProgress]);
+
+  // Debug progress data changes
+  useEffect(() => {
+    console.log('Dashboard: Progress data updated:', progressData);
+  }, [progressData]);
 
   const loadRecentActivity = async () => {
     if (!user?.uid) return;
@@ -62,6 +72,14 @@ const Dashboard = () => {
 
   const handleWritingGoals = () => {
     navigate('/writing-goals');
+  };
+
+  const handleUpdateWeeklyGoal = async (goal: number) => {
+    console.log('Dashboard: Updating weekly goal to:', goal);
+    if (user?.uid) {
+      await setWeeklyGoal(user.uid, goal);
+      console.log('Dashboard: Weekly goal updated, current progressData:', progressData);
+    }
   };
 
   const handleDeleteDocument = async (documentId: string, event: React.MouseEvent) => {
@@ -177,12 +195,17 @@ const Dashboard = () => {
                 <TrendingUp className="h-6 w-6" />
               </div>
               <h3 className="text-2xl font-bold encouraging-text mb-1">
-                {recentDocuments.length > 0 ? '🔥' : '🎯'}
+                {progressData?.currentStreak || 0} {progressData?.currentStreak === 1 ? 'day' : 'days'}
               </h3>
               <p className="motivational-text">
-                {recentDocuments.length > 0 ? 'Writing Streak' : 'Ready to Start'}
+                {(progressData?.currentStreak || 0) > 0 ? 'Writing Streak 🔥' : 'Ready to Start 🎯'}
               </p>
-              <p className="text-sm text-gray-600 mt-2">You're making progress! ✨</p>
+              <p className="text-sm text-gray-600 mt-2">
+                {(progressData?.currentStreak || 0) > 0 
+                  ? `Keep it up! ${(progressData?.currentStreak || 0) > 1 ? 'Amazing consistency!' : 'Great start!'} ✨`
+                  : 'Login daily to build your streak! 💪'
+                }
+              </p>
             </div>
             
             <div className="warm-card text-center">
@@ -199,6 +222,23 @@ const Dashboard = () => {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+        {/* Test Button (Development Only) */}
+        <TestProgressButton />
+
+        {/* Progress Tracking */}
+        {progressData && (
+          <div className="mb-12">
+            <h3 className="text-2xl font-bold encouraging-text mb-6 flex items-center">
+              <TrendingUp className="h-6 w-6 text-accent-emerald mr-2" />
+              Your Progress
+            </h3>
+            <ProgressCards 
+              progressData={progressData} 
+              onUpdateWeeklyGoal={handleUpdateWeeklyGoal}
+            />
+          </div>
+        )}
+
         {/* Quick Actions */}
         <div className="mb-12">
           <h3 className="text-2xl font-bold encouraging-text mb-6 flex items-center">

@@ -38,7 +38,7 @@ const RegisterForm = () => {
 
   return (
     <div className="min-h-screen bg-encouraging-gradient flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
+      <div className="max-w-lg w-full space-y-8">
         {/* Logo and Header */}
         <div className="text-center animate-fade-in mb-8">
           <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-accent-teal to-accent-cyan mx-auto mb-6 flex items-center justify-center shadow-xl">
@@ -79,11 +79,11 @@ const RegisterForm = () => {
         <div className="warm-card animate-slide-up">
           <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
             <div className="space-y-4">
-              <div className="w-full">
+              <div>
                 <label htmlFor="displayName" className="sr-only">
                   Full name
                 </label>
-                <div className="relative w-full">
+                <div className="relative">
                   <User className="h-5 w-5 text-accent-teal absolute left-3.5 top-1/2 transform -translate-y-1/2" />
                   <input
                     id="displayName"
@@ -91,7 +91,7 @@ const RegisterForm = () => {
                     type="text"
                     autoComplete="name"
                     required
-                    className="warm-input pl-12"
+                    className="warm-input pl-12 py-4 text-base w-full"
                     placeholder="Full name"
                     value={displayName}
                     onChange={(e) => setDisplayName(e.target.value)}
@@ -99,11 +99,11 @@ const RegisterForm = () => {
                 </div>
               </div>
 
-              <div className="w-full">
+              <div>
                 <label htmlFor="email" className="sr-only">
                   Email address
                 </label>
-                <div className="relative w-full">
+                <div className="relative">
                   <Mail className="h-5 w-5 text-accent-teal absolute left-3.5 top-1/2 transform -translate-y-1/2" />
                   <input
                     id="email"
@@ -111,7 +111,7 @@ const RegisterForm = () => {
                     type="email"
                     autoComplete="email"
                     required
-                    className="warm-input pl-12"
+                    className="warm-input pl-12 py-4 text-base w-full"
                     placeholder="Email address"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -119,11 +119,11 @@ const RegisterForm = () => {
                 </div>
               </div>
 
-              <div className="w-full">
+              <div>
                 <label htmlFor="password" className="sr-only">
                   Password
                 </label>
-                <div className="relative w-full">
+                <div className="relative">
                   <Lock className="h-5 w-5 text-accent-teal absolute left-3.5 top-1/2 transform -translate-y-1/2" />
                   <input
                     id="password"
@@ -131,7 +131,7 @@ const RegisterForm = () => {
                     type="password"
                     autoComplete="new-password"
                     required
-                    className="warm-input pl-12"
+                    className="warm-input pl-12 py-4 text-base w-full"
                     placeholder="Password (at least 6 characters)"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -209,9 +209,6 @@ const RegisterForm = () => {
               <span>A safe space for essays, stories, and creative expression</span>
             </div>
           </div>
-          <p className="text-xs motivational-text max-w-sm mx-auto mt-4">
-            Join over 10,000+ students who've discovered the joy of writing in our encouraging, supportive community! 🌟
-          </p>
         </div>
       </div>
     </div>

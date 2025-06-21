@@ -110,6 +110,7 @@
 /* Custom scrollbar with neutral colors */
 ::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -124,6 +125,25 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(45deg, #0891b2, #14b8a6);
+}
+
+/* Thin scrollbar for horizontal scrolling */
+.scrollbar-thin::-webkit-scrollbar {
+  height: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 2px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 2px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 /* Neutral loading animations */

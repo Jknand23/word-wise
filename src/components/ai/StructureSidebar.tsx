@@ -165,8 +165,9 @@ const StructureSidebar: React.FC<StructureSidebarProps> = ({
   };
 
   return (
-    <div className="bg-white border-l border-gray-200 w-80 h-full overflow-y-auto">
-      <div className="p-4 border-b border-gray-200">
+    <div className="h-full flex flex-col bg-white">
+      {/* Header - Fixed */}
+      <div className="flex-shrink-0 p-4 border-b border-gray-200">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-lg font-semibold text-gray-900 flex items-center">
             <FileText className="w-5 h-5 mr-2 text-blue-600" />
@@ -256,7 +257,8 @@ const StructureSidebar: React.FC<StructureSidebarProps> = ({
         )}
       </div>
 
-      <div className="p-4">
+      {/* Content - Scrollable */}
+      <div className="flex-1 overflow-y-auto p-4">
         {!structure ? (
           <div className="text-center text-gray-500 py-8">
             <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />

@@ -93,10 +93,12 @@ export interface SuggestionRequest {
   documentId: string;
   content: string;
   userId: string;
-  analysisType?: 'full' | 'incremental';
+  analysisType?: 'full' | 'incremental' | 'differential';
+  previousContent?: string; // ✅ DIFFERENTIAL ANALYSIS - Previous content for change tracking
   previouslyModifiedAreas?: ModifiedArea[];
   writingGoals?: WritingGoalsConfig;
   paragraphTags?: ParagraphTag[]; // Include paragraph tags to exclude "Done" paragraphs
+  bypassCache?: boolean; // Skip cache and force fresh analysis
 }
 
 export interface SuggestionResponse {
@@ -107,6 +109,22 @@ export interface SuggestionResponse {
     prompt: number;
     completion: number;
     total: number;
+  };
+  optimizationMetadata?: {
+    usedContextWindow: boolean;
+    usedCache?: boolean;
+    cacheHit?: boolean;
+    tokenSavings: {
+      originalTokens: number;
+      optimizedTokens: number;
+      savings: number;
+    } | null;
+    contextWindowSize: number;
+    cacheMetadata?: {
+      cacheHit: boolean;
+      accessCount: number;
+      cacheAge: number;
+    };
   };
 }
 

@@ -7,7 +7,8 @@
  * See a full list of supported triggers at https://firebase.google.com/docs/functions
  */
 
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onCall, HttpsError, onRequest } from "firebase-functions/v2/https";
+import type { Request, Response } from "express";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 import { initializeApp } from "firebase-admin/app";
@@ -24,7 +25,7 @@ const db = getFirestore(app);
 
 // CORS options
 const corsOptions = {
-  cors: ["http://localhost:5173", "https://wordwise-ai-3a4e1.web.app"],
+  cors: ["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "https://wordwise-ai-3a4e1.web.app"],
 };
 
 const commonOptions = {
@@ -32,210 +33,70 @@ const commonOptions = {
   secrets: [openaiApiKey],
 };
 
+// Choose OpenAI model
+const OPENAI_MODEL = "gpt-4o"; // Upgraded from gpt-4-turbo-preview
+
 // Generate system prompt based on writing goals
 function generateSystemPrompt(writingGoals?: any): string {
-  const academicLevel = writingGoals?.academicLevel || 'high-school';
-  const assignmentType = writingGoals?.assignmentType || 'essay';
-  const grammarStrictness = writingGoals?.grammarStrictness || 'moderate';
-  const vocabularyLevel = writingGoals?.vocabularyLevel || 'intermediate';
-  const toneRecommendation = writingGoals?.toneRecommendation || 'Formal and well-structured';
-  const customInstructions = writingGoals?.customInstructions || '';
+  const level = writingGoals?.academicLevel || 'high-school';
+  const base = (categories: string, levelSpecific: string) => `${categories}
 
-  let analysisDepth = '';
-  let additionalCategories = '';
-  
-  // Adjust analysis depth based on academic level
-  switch (academicLevel) {
-    case 'middle-school':
-      analysisDepth = `
-      ANALYSIS FOCUS for MIDDLE SCHOOL level:
-      - Focus on fundamental writing skills and basic sentence construction
-      - Provide simple, encouraging explanations that build confidence
-      - Encourage complete sentences and basic paragraph structure
-      - Grammar suggestions should be straightforward and educational (capitals, periods, basic punctuation)
-      - Focus on making sure each sentence expresses a complete thought
-      - Help with basic organization: beginning, middle, end
-      - Encourage descriptive words and varied sentence beginnings
-      - Keep suggestions positive and constructive to build writing confidence`;
-      additionalCategories = 'Basic tone and simple structure suggestions may be provided to encourage clear communication.';
-      break;
-      
-    case 'high-school':
-      analysisDepth = `
-      ANALYSIS FOCUS for HIGH SCHOOL level:
-      - Encourage clearer paragraph structure and better topic sentences
-      - Focus on developing complete thoughts and logical connections between ideas
-      - Build vocabulary beyond basic words but not yet advanced academic terminology
-      - Grammar suggestions should include compound/complex sentence construction
-      - Flag obvious run-on sentences but be more lenient than undergraduate level
-      - Suggest basic transitions (First, Next, However, Therefore) to improve flow
-      - Encourage more precise word choices without demanding sophisticated terminology
-      - Help develop argument structure with clear introduction, body, and conclusion`;
-      additionalCategories = `
-      5. TONE: Suggest improvements to match ${assignmentType} writing expectations (formal but accessible)
-      6. STRUCTURE: Recommend improvements to paragraph organization and basic transitions between ideas
-      High school level: Building toward academic writing with clear expectations but reasonable standards.`;
-      break;
-      
-    case 'undergrad':
-      analysisDepth = `
-      ANALYSIS FOCUS for UNDERGRADUATE level:
-      - Demand rigorous analysis and sophisticated argumentation
-      - Focus on complex sentence structures and advanced vocabulary
-      - Provide detailed explanations of rhetorical effectiveness
-      - Grammar suggestions should include nuanced style points
-      - Expect higher standards for evidence integration and critical thinking
-      - AGGRESSIVELY identify run-on sentences and suggest splitting them
-      - Flag informal language and suggest more academic alternatives
-      - Require proper punctuation for dialogue and quotes
-      - Demand sophisticated transitions between sentences and ideas
-      - Challenge basic word choices and suggest more precise terminology`;
-      additionalCategories = `
-      5. TONE: Ensure academic tone appropriate for ${assignmentType} assignments (flag informal phrases like "really changed", "very much")
-      6. STRUCTURE: Analyze argument flow, transitions, and organizational logic (flag abrupt sentence starts, missing connectives)
-      7. DEPTH: Suggest deeper analysis, more sophisticated reasoning, and stronger evidence (challenge surface-level observations)
-      8. VOCABULARY: Recommend more precise, academic, or field-specific terminology (replace casual words with sophisticated alternatives)
-      Comprehensive analysis for undergraduate academic writing with high standards.`;
-      break;
-  }
+${levelSpecific}
 
-  // Assignment-specific guidance
-  let assignmentGuidance = '';
-  switch (assignmentType) {
-    case 'essay':
-      assignmentGuidance = `
-      ESSAY-SPECIFIC GUIDANCE:
-      - Focus on thesis clarity and argument development
-      - Ensure proper evidence integration and citation style
-      - Check for logical flow between paragraphs
-      - Maintain formal academic tone throughout`;
-      break;
-    case 'reflection':
-      assignmentGuidance = `
-      REFLECTION-SPECIFIC GUIDANCE:
-      - Allow for first-person perspective and personal insights
-      - Focus on thoughtful analysis of experiences
-      - Ensure balance between personal narrative and analytical reflection
-      - Support personal insights with specific examples`;
-      break;
-    case 'report':
-      assignmentGuidance = `
-      REPORT-SPECIFIC GUIDANCE:
-      - Prioritize objective, factual presentation
-      - Focus on clear organization and data presentation
-      - Ensure proper use of headings and sections
-      - Maintain neutral, professional tone throughout`;
-      break;
-  }
+CRITICAL PUNCTUATION DETECTION RULES:
+- ALWAYS analyze text for missing end punctuation (., !, ?)
+- ANY sentence that ends without punctuation MUST have a punctuation suggestion
+- Detect and fix apostrophes in contractions (dont → don't)
 
-  return `You are an expert writing assistant. Analyze the provided text and return suggestions for improvements in the following categories:
+CONFIDENCE RULES:
+- After suggesting a change to wording (clarity, engagement, vocabulary), assume the new text is correct.
+- Do NOT immediately propose synonyms for newly suggested words unless the original meaning is still unclear.
+- Only suggest alternative wording if it fixes an objective problem (ambiguity, incorrect meaning), not stylistic preference.
 
-CORE CATEGORIES (ALWAYS ANALYZED):
-1. SPELLING: Identify and correct spelling errors (like "teh" → "the", "lets" → "let's")
-2. GRAMMAR: Fix grammatical errors with ${grammarStrictness} strictness including:
-   - Missing capitalization at sentence start (e.g., "hello world" → "Hello world")
-   - Missing punctuation at sentence end (e.g., "Hello world" → "Hello world.")
-   - Contractions (e.g., "lets go" → "let's go")
-   - Subject-verb agreement and other grammatical issues
-3. CLARITY: Suggest improvements for unclear or confusing sentences
-4. ENGAGEMENT: Recommend ways to make the text more engaging and compelling
+ANTI-ENDLESS SUGGESTION RULES (concise):
+- Do not repeat the same suggestion once accepted.
 
-ADVANCED CATEGORIES (BASED ON ACADEMIC LEVEL):
-${additionalCategories}
+Return suggestions as JSON with a 'suggestions' array.`;
 
-${analysisDepth}
+  const commonCategories = `You are an expert writing assistant. Carefully review the text and propose concrete fixes.
 
-${assignmentGuidance}
-
-VOCABULARY LEVEL: Target ${vocabularyLevel} vocabulary appropriate for ${academicLevel} level.
-
-TONE EXPECTATION: ${toneRecommendation}
-
-${customInstructions ? `CUSTOM INSTRUCTIONS: ${customInstructions}` : ''}
-
-IMPORTANT GUIDELINES:
-- Grammar and spelling corrections apply across all levels
-- For missing capitalization: suggest ONLY capitalizing the first letter, don't change the rest
-- For missing punctuation: CAREFULLY CHECK if punctuation already exists - suggest ONLY adding a period if there's truly no punctuation at the end
-- BEFORE suggesting punctuation: verify the sentence doesn't already end with a period, question mark, or exclamation point
-- Don't suggest fancy formatting like "Hello, World!" unless specifically appropriate
-- Prefer simple, minimal changes that fix specific issues
-- Each suggestion should address ONE specific issue
-- CRITICAL: Do not suggest adding periods if one already exists - check the exact end of the sentence carefully
-
-MIDDLE SCHOOL SPECIFIC GUIDELINES:
-- Focus primarily on complete sentences and basic punctuation
-- Be encouraging and positive in all feedback
-- Only flag very obvious errors that clearly need fixing
-- Suggest simple word improvements but don't overwhelm with vocabulary changes
-- Help with basic sentence variety (Don't start every sentence with "I")
-- Keep explanations simple and easy to understand
-- Don't flag minor issues - focus on clarity and basic correctness
-
-HIGH SCHOOL SPECIFIC GUIDELINES:
-- Flag obvious run-on sentences (more than 25 words with multiple clauses) but be more forgiving than undergraduate
-- Suggest quotation marks for dialogue but focus on clarity over perfect punctuation
-- Flag very informal phrases like "a lot", "kind of", "really cool" but allow "really changed" and "very much"
-- Suggest basic transitions (First, Next, However, Therefore) but don't demand sophisticated connectors
-- Encourage better word choices but don't require advanced vocabulary
-- Help with paragraph structure - each paragraph should have a clear main idea
-- Focus on making sure ideas are complete and connected logically
-
-UNDERGRADUATE SPECIFIC GUIDELINES:
-- ALWAYS flag run-on sentences that contain multiple independent clauses with just "and" or no connectors
-- ALWAYS suggest proper quotation marks around dialogue (e.g., 'he said "Thank you very much"')
-- ALWAYS flag informal phrases like "really changed", "very much", "a lot", "kind of" and suggest academic alternatives
-- ALWAYS suggest better transitions between sentences (However, Furthermore, Consequently, etc.)
-- ALWAYS challenge basic vocabulary choices and suggest more sophisticated alternatives
-- FLAG sentences that start abruptly without connection to previous thoughts
-
-ANTI-ENDLESS SUGGESTION RULES:
-- CRITICAL: Some areas have been previously modified for clarity/engagement improvements
-- DO NOT suggest clarity improvements for text areas that have already been modified 1+ times (ONLY ONE CLARITY CHANGE PER AREA EVER)
-- DO NOT suggest engagement improvements for text areas that have already been modified 1+ times (ONLY ONE ENGAGEMENT CHANGE PER AREA EVER)
-- CLARITY suggestions should be COMPREHENSIVE - if an area needs clarity improvement, suggest a substantial rewrite rather than minor tweaks
-- ENGAGEMENT suggestions should be EXTREMELY RARE and only for obviously poor engagement
-- CRITICAL: ENGAGEMENT suggestions are creating endless loops - be ULTRA-CONSERVATIVE
-- DO NOT suggest engagement improvements unless the text is truly awful and unprofessional
-- AVOID any engagement suggestions that might be subjective or stylistic preferences
-- NEVER suggest reversing a previous change or going back to an earlier version
-- AVOID suggesting changes that would create a back-and-forth pattern
-- Be ULTRA-CONSERVATIVE with both clarity and engagement suggestions - they create endless loops
-- Focus on spelling and grammar errors which are objective, avoid subjective clarity/engagement changes in heavily modified areas
-- If an area has been modified recently, DO NOT suggest any further clarity/engagement changes (3-minute cooldown)
-- When in doubt about whether to suggest a clarity/engagement change, DON'T suggest it
-- Clarity/engagement changes should be substantial, comprehensive improvements, not minor tweaks
-- If you suggest a clarity improvement, make it count - rewrite the entire problematic section properly
+MANDATORY OUTPUT REQUIREMENTS:
+- Return **at least 15** actionable suggestions (combine categories as needed).
+- If the passage is short, still supply every possible improvement—do not leave the array empty.
+- Each suggestion must fall into exactly one of these categories (use lowercase):
+  1. spelling
+  2. grammar (strictness: ${writingGoals?.grammarStrictness || 'moderate'})
+  3. clarity
+  4. engagement
 
 For each suggestion, provide:
-- type: 'spelling', 'grammar', 'clarity', 'engagement', 'tone', 'structure', 'depth', or 'vocabulary'
-- category: 'error', 'improvement', or 'enhancement'
-- severity: 'low', 'medium', or 'high'
-- originalText: The exact text to be replaced
-- suggestedText: The suggested replacement text
-- explanation: A clear, concise explanation of the suggestion
-- educationalExplanation: A more detailed explanation of the underlying writing principle
-- startIndex: The starting index of the original text in the content
-- endIndex: The ending index of the original text in the content
+- type: "spelling" | "grammar" | "clarity" | "engagement" (lowercase)
+- category: "error" | "improvement" | "enhancement" 
+- severity: "low" | "medium" | "high"
+- originalText: exact text to replace
+- suggestedText: improved version
+- explanation: clear reason for the change
+- confidence: number between 0 and 1
 
-Return the response as a valid JSON object with a 'suggestions' array.
-Example for a spelling error:
-{
-  "suggestions": [
-    {
-      "type": "spelling",
-      "category": "error",
-      "severity": "high",
-      "originalText": "teh",
-      "suggestedText": "the",
-      "explanation": "Corrected spelling",
-      "educationalExplanation": "The word 'the' is a common article and is spelled T-H-E.",
-      "startIndex": 10,
-      "endIndex": 13
-    }
-  ]
-}
-`;
+If no issues are found for a category, redistribute focus to other categories to keep the minimum count.`;
+
+  switch (level) {
+    case 'middle-school':
+      return base(commonCategories, `MIDDLE SCHOOL FOCUS:
+- Fundamental writing skills, basic sentence construction
+- Simple, encouraging explanations
+- Emphasise complete sentences and basic punctuation`);
+    case 'undergrad':
+      return base(commonCategories, `UNDERGRADUATE FOCUS:
+- Rigorous analysis & sophisticated vocabulary
+- Aggressively flag run-ons and informal language
+- Demand academic tone and strong transitions`);
+    default: /* high-school */
+      return base(commonCategories, `HIGH SCHOOL FOCUS:
+- Clear paragraph structure & topic sentences
+- Encourage precise word choice, basic transitions
+- Flag obvious run-ons but be moderate in strictness`);
+  }
 }
 
 // System prompt for parsing assignment rubrics
@@ -433,7 +294,7 @@ async function getOpenAICompletion(
   try {
     const openai = new OpenAI({ apiKey: openaiApiKey.value() });
     const completion = await openai.chat.completions.create({
-      model: "gpt-4-turbo-preview",
+      model: OPENAI_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -447,7 +308,35 @@ async function getOpenAICompletion(
       throw new HttpsError("internal", "No response content from OpenAI.");
     }
 
-    return JSON.parse(responseContent);
+    try {
+      return JSON.parse(responseContent);
+    } catch (initialParseError) {
+      logger.warn("⚠️ OpenAI response was not valid JSON. Retrying with simplified instructions.");
+
+      // Retry once with an explicit instruction to limit suggestions to 50 items
+      const retryCompletion = await openai.chat.completions.create({
+        model: OPENAI_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: `${userPrompt}\n\nLIMIT_SUGGESTIONS: Return no more than 50 suggestions.` },
+        ],
+        temperature,
+        response_format: { type: "json_object" },
+      });
+
+      const retryContent = retryCompletion.choices[0].message.content;
+      if (!retryContent) {
+        throw new HttpsError("internal", "No response content from OpenAI on retry.");
+      }
+
+      try {
+        return JSON.parse(retryContent);
+      } catch (retryParseError) {
+        logger.error("❌ Failed to parse OpenAI retry response:", { retryParseError, retryContent });
+        // Rethrow the original parse error for upstream handling
+        throw new HttpsError("internal", "Failed to parse OpenAI JSON response.");
+      }
+    }
   } catch (error) {
     logger.error("Error calling OpenAI API:", error);
     if (error instanceof HttpsError) {
@@ -496,87 +385,413 @@ async function checkRateLimit(userId: string) {
   return true;
 }
 
+// Cache service functions for Firebase environment
+const cacheService = {
+  // ✅ CACHING SERVICE - Generate content hash for caching
+  generateContentHash(content: string | any[], writingGoals?: any, contextType: 'full' | 'contextWindow' = 'full'): string {
+    const hashData = {
+      content: Array.isArray(content) ? content : content,
+      writingGoals: writingGoals || {},
+      contextType,
+      // Add timestamp component to ensure cache freshness
+      version: 'v2.1'
+    };
+    
+    const hashString = JSON.stringify(hashData);
+    return this.simpleHash(hashString);
+  },
+
+  // ✅ Enhanced content hash that includes accepted suggestions context
+  generateContentHashWithHistory(content: string, writingGoals?: any, acceptedSuggestions: any[] = [], contextType: 'full' | 'contextWindow' = 'full'): string {
+    const hashData = {
+      content: content,
+      writingGoals: writingGoals || {},
+      contextType,
+      // Include accepted suggestions to prevent re-suggesting same content
+      acceptedSuggestionsHash: acceptedSuggestions.length > 0 ? 
+        this.simpleHash(JSON.stringify(acceptedSuggestions.map(s => ({ 
+          originalText: s.originalText, 
+          suggestedText: s.suggestedText, 
+          type: s.type 
+        })))) : 'none',
+      version: 'v2.1'
+    };
+    
+    const hashString = JSON.stringify(hashData);
+    return this.simpleHash(hashString);
+  },
+
+  async getCachedAnalysis(contentHash: string, userId: string): Promise<{ analysis: any; metadata: any } | null> {
+    try {
+      const cacheRef = db.collection('analysisCache').doc(`${userId}_${contentHash}`);
+      const cacheDoc = await cacheRef.get();
+      
+      if (!cacheDoc.exists) {
+        logger.info('🔍 Cache miss: Entry not found');
+        return null;
+      }
+      
+      const cacheData = cacheDoc.data();
+      if (!cacheData) return null;
+      
+      const now = new Date();
+      
+      // Check if cache entry has expired
+      if (cacheData.expiresAt.toDate() < now) {
+        logger.info('⏰ Cache miss: Entry expired, cleaning up');
+        await cacheRef.delete();
+        return null;
+      }
+      
+      // Update access statistics
+      await cacheRef.update({
+        lastAccessedAt: FieldValue.serverTimestamp(),
+        accessCount: cacheData.accessCount + 1
+      });
+      
+      logger.info('✅ Cache hit:', {
+        contentHash: contentHash.substring(0, 8) + '...',
+        accessCount: cacheData.accessCount + 1,
+        age: Math.round((now.getTime() - cacheData.createdAt.toDate().getTime()) / (1000 * 60)) + 'min',
+        tokenCount: cacheData.metadata.tokenCount
+      });
+      
+      return {
+        analysis: cacheData.analysis,
+        metadata: {
+          ...cacheData.metadata,
+          cacheHit: true,
+          accessCount: cacheData.accessCount + 1,
+          cacheAge: now.getTime() - cacheData.createdAt.toDate().getTime()
+        }
+      };
+      
+    } catch (error) {
+      logger.error('❌ Error checking cache:', error);
+      return null;
+    }
+  },
+
+  async setCachedAnalysis(
+    contentHash: string,
+    userId: string,
+    analysis: any,
+    metadata: {
+      documentId?: string;
+      contextType: 'full' | 'contextWindow';
+      tokenCount: number;
+      paragraphCount: number;
+      writingGoalsHash?: string;
+    }
+  ): Promise<void> {
+    try {
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 24); // 24 hours TTL
+      
+      const cacheEntry = {
+        id: `${userId}_${contentHash}`,
+        contentHash,
+        analysis,
+        metadata: {
+          ...metadata,
+          userId
+        },
+        createdAt: FieldValue.serverTimestamp(),
+        lastAccessedAt: FieldValue.serverTimestamp(),
+        accessCount: 0,
+        expiresAt: FieldValue.serverTimestamp() // Will be updated with proper expiry
+      };
+      
+      const cacheRef = db.collection('analysisCache').doc(cacheEntry.id);
+      await cacheRef.set(cacheEntry);
+      
+      // Update with proper expiry time
+      await cacheRef.update({
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+      });
+      
+      logger.info('💾 Cached analysis:', {
+        contentHash: contentHash.substring(0, 8) + '...',
+        contextType: metadata.contextType,
+        tokenCount: metadata.tokenCount,
+        expiresIn: '24h'
+      });
+      
+    } catch (error) {
+      logger.error('❌ Error setting cache:', error);
+      // Don't throw - caching failures shouldn't break the main functionality
+    }
+  },
+
+  simpleHash(str: string): string {
+    let hash = 0;
+    if (str.length === 0) return hash.toString();
+    
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    
+    return Math.abs(hash).toString(16);
+  }
+};
+
 // Main function to analyze content for suggestions
 export const analyzeSuggestions = onCall(commonOptions, async (request) => {
+  console.log('🔍 [Firebase] analyzeSuggestions called with request data keys:', Object.keys(request.data));
+  
   const startTime = Date.now();
-
-  // Validate user authentication and data
-  if (!request.auth) {
-    throw new HttpsError(
-      "unauthenticated",
-      "The function must be called while authenticated.",
-    );
-  }
-
-  const { content, documentId, userId, previouslyModifiedAreas, writingGoals } = request.data;
-  if (!content || !documentId || !userId) {
-    throw new HttpsError(
-      "invalid-argument",
-      "Missing required data: content, documentId, or userId.",
-    );
-  }
-
-  // Verify that the user ID from the request matches the authenticated user
-  if (request.auth.uid !== userId) {
-    throw new HttpsError(
-      "permission-denied",
-      "You are not authorized to perform this action.",
-    );
-  }
-
-  // Check rate limit
-  const isWithinRateLimit = await checkRateLimit(userId);
-  if (!isWithinRateLimit) {
-    throw new HttpsError(
-      "resource-exhausted",
-      "You have exceeded the rate limit. Please try again later.",
-    );
-  }
+  let responseMetadata = {
+    cached: false,
+    tokenCount: 0,
+    processingTime: 0,
+    cacheKey: '',
+    analysisType: 'unknown'
+  };
 
   try {
-    const systemPrompt = generateSystemPrompt(writingGoals);
-    const userPrompt = `
-      Analyze the following text.
-      Here are the areas that were recently modified by the user. Be extra careful not to suggest changes to these areas unless you find a clear spelling or grammar error:
-      ${JSON.stringify(previouslyModifiedAreas || [])}
-      ---
-      TEXT TO ANALYZE:
-      ${content}
-    `;
-
-    const gptResponse = await getOpenAICompletion(systemPrompt, userPrompt);
-    const { suggestions = [] } = gptResponse;
-
-    const suggestionsWithIds = suggestions.map((s: any) => ({
-      ...s,
-      id: `sug_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        documentId,
-        userId,
-      status: "pending",
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-    }));
-
-    // Save suggestions to Firestore
-    const batch = db.batch();
-    suggestionsWithIds.forEach((suggestion: any) => {
-      const suggestionRef = db.collection("suggestions").doc(suggestion.id);
-      batch.set(suggestionRef, suggestion);
-    });
-    await batch.commit();
-
-    const processingTime = Date.now() - startTime;
-    return {
-      suggestions: suggestionsWithIds,
-      analysisId: `analysis_${Date.now()}`,
-      processingTime,
-    };
-  } catch (error) {
-    logger.error("Error in analyzeSuggestions:", error);
-    if (error instanceof HttpsError) {
-      throw error;
+    const { content, documentId, userId, writingGoals, contextWindow, analysisType = 'full', timestamp, bypassCache = false } = request.data;
+    
+    if (!content || !userId) {
+      throw new Error('Missing required parameters: content and userId are required');
     }
-    throw new HttpsError("internal", "An unexpected error occurred.");
+
+    console.log('🔍 [Firebase] Processing analysis request:', {
+      contentLength: content.length,
+      documentId: documentId || 'not provided',
+      userId: userId,
+      analysisType,
+      hasWritingGoals: !!writingGoals,
+      hasContextWindow: !!contextWindow,
+      timestamp
+    });
+
+    // Rate limiting
+    await checkRateLimit(userId);
+    
+    // Determine content to analyze
+    const contentToAnalyze = contextWindow || content;
+    responseMetadata.analysisType = contextWindow ? 'differential' : analysisType;
+    
+    // 🔧 NEW: Fetch accepted suggestions to prevent duplicates
+    let acceptedSuggestions: any[] = [];
+    if (documentId) {
+      try {
+        console.log('📋 [Firebase] Fetching accepted suggestions for duplicate prevention');
+        const acceptedQuery = db
+          .collection('suggestions')
+          .where('documentId', '==', documentId)
+          .where('userId', '==', userId)
+          .where('status', '==', 'accepted')
+          .orderBy('updatedAt', 'desc')
+          .limit(5); // Last 5 accepted suggestions
+        
+        const acceptedSnapshot = await acceptedQuery.get();
+        acceptedSuggestions = acceptedSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        console.log(`📋 [Firebase] Found ${acceptedSuggestions.length} accepted suggestions for duplicate filtering`);
+        
+        // Log recent accepted suggestions for debugging
+        if (acceptedSuggestions.length > 0) {
+          console.log('📋 [Firebase] Recent accepted suggestions:', 
+            acceptedSuggestions.slice(0, 3).map(s => ({
+              originalText: s.originalText,
+              suggestedText: s.suggestedText,
+              type: s.type
+            }))
+          );
+        }
+      } catch (error) {
+        console.warn('⚠️ [Firebase] Failed to fetch accepted suggestions:', error);
+        // Continue without accepted suggestions filter
+      }
+    }
+
+    // Generate cache key with accepted suggestions context
+    const cacheKey = cacheService.generateContentHashWithHistory(
+      Array.isArray(contentToAnalyze) ? JSON.stringify(contentToAnalyze) : contentToAnalyze, 
+      writingGoals,
+      acceptedSuggestions,
+      contextWindow ? 'contextWindow' : 'full'
+    );
+    responseMetadata.cacheKey = cacheKey;
+    
+    console.log('🔍 [Firebase] Generated cache key:', cacheKey);
+
+    // Check cache first unless bypassed
+    if (!bypassCache) {
+      const cached = await cacheService.getCachedAnalysis(cacheKey, userId);
+      if (cached) {
+        const cacheAge = Date.now() - cached.metadata.timestamp;
+        console.log(`💾 [Firebase] Cache hit! Age: ${Math.round(cacheAge / 1000)}s`);
+        
+        responseMetadata.cached = true;
+        responseMetadata.processingTime = Date.now() - startTime;
+        responseMetadata.tokenCount = cached.metadata.tokenCount || 0;
+        
+        return {
+          metadata: responseMetadata,
+          message: `${acceptedSuggestions.length} suggestions are being processed.`,
+        };
+      }
+    }
+    console.log('🔍 [Firebase] Cache miss - proceeding with AI analysis');
+
+    // Prepare system prompt and user prompt
+    const systemPrompt = generateSystemPrompt(writingGoals || { academicLevel: 'undergrad' });
+    let userPrompt: string;
+    
+    // Handle context window vs full content
+    if (contextWindow && Array.isArray(contextWindow)) {
+      console.log('🔍 [Firebase] Using context window for differential analysis');
+      const contextText = contextWindow
+        .map(w => `[${w.index}${w.isChanged ? ' CHANGED' : ''}] ${w.text}`)
+        .join('\n\n');
+      
+      userPrompt = `Analyze the following content sections. Focus on the CHANGED sections for new suggestions:
+
+${contextText}
+
+${acceptedSuggestions.length > 0 ? `
+🚫 CRITICAL DUPLICATE PREVENTION: The following suggestions have already been accepted and applied. DO NOT suggest these exact changes or similar variations:
+${acceptedSuggestions.map(s => `- "${String(s.originalText).slice(0, 40)}..."`).join('\n')}
+
+DUPLICATE PREVENTION RULES:
+- If you see text that matches any "suggestedText" above, DO NOT suggest changes to it
+- If the current text already includes the fixes from accepted suggestions, DO NOT re-suggest them
+- Focus on NEW issues that haven't been addressed yet
+- When text shows "I don't know." (with apostrophe and period), do NOT suggest adding apostrophe or period again
+` : ''}
+
+Return suggestions as JSON with the required format.`;
+    } else {
+      console.log('🔍 [Firebase] Using full content for analysis');
+      userPrompt = `Please analyze the following text and provide suggestions for improvement:
+
+${contentToAnalyze}
+
+${acceptedSuggestions.length > 0 ? `
+🚫 CRITICAL DUPLICATE PREVENTION: The following suggestions have already been accepted and applied. DO NOT suggest these exact changes or similar variations:
+${acceptedSuggestions.map(s => `- "${String(s.originalText).slice(0, 40)}..."`).join('\n')}
+
+DUPLICATE PREVENTION RULES:
+- If you see text that matches any "suggestedText" above, DO NOT suggest changes to it
+- If the current text already includes the fixes from accepted suggestions, DO NOT re-suggest them
+- Focus on NEW issues that haven't been addressed yet
+- When text shows "I don't know." (with apostrophe and period), do NOT suggest adding apostrophe or period again
+` : ''}
+
+Return suggestions as JSON with the required format.`;
+    }
+
+    console.log('🤖 [Firebase] Calling OpenAI API...');
+    // Use lower temperature for deterministic, grammar-focused suggestions
+    const response = await getOpenAICompletion(systemPrompt, userPrompt, 0.1);
+    
+    // Calculate token count (rough estimate)
+    const tokenCount = Math.ceil((systemPrompt.length + userPrompt.length + JSON.stringify(response).length) / 4);
+    responseMetadata.tokenCount = tokenCount;
+    
+    console.log('🤖 [Firebase] OpenAI response received, parsing suggestions...');
+    
+    const suggestions = response.suggestions || [];
+    console.log(`✅ [Firebase] Analysis complete: ${suggestions.length} suggestions generated`);
+
+    // Write new suggestions to Firestore - SIMPLIFIED APPROACH
+    if (documentId && userId && suggestions.length > 0) {
+      console.log(`🔍 [Firebase] Writing ${suggestions.length} suggestions to Firestore`);
+      console.log('🔍 [Firebase] First suggestion sample:', JSON.stringify(suggestions[0], null, 2));
+      
+      const batch = db.batch();
+      let successCount = 0;
+      
+      suggestions.forEach((suggestion: any, index: number) => {
+        try {
+          const suggestionRef = db.collection("suggestions").doc();
+          
+          // Minimal data cleaning - accept almost everything
+          const cleanSuggestion = {
+            id: suggestionRef.id,
+            documentId,
+            userId,
+            status: "pending",
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+            
+            // Core suggestion data - use what AI provides or sensible defaults
+            originalText: suggestion.originalText || `Text ${index}`,
+            suggestedText: suggestion.suggestedText || `Improved text ${index}`,
+            type: suggestion.type || 'grammar', // Default to grammar instead of 'improvement'
+            category: suggestion.category || 'general',
+            severity: suggestion.severity || 'medium',
+            confidence: suggestion.confidence || 0.85,
+            explanation: suggestion.explanation || 'AI suggested improvement',
+            grammarRule: suggestion.grammarRule || null,
+            
+            // Index handling - calculate from content if missing
+            startIndex: suggestion.startIndex || 0,
+            endIndex: suggestion.endIndex || (suggestion.originalText ? suggestion.originalText.length : 1),
+          };
+          
+          batch.set(suggestionRef, cleanSuggestion);
+          successCount++;
+          
+          console.log(`✅ [Firebase] Prepared suggestion ${index}: "${cleanSuggestion.originalText}" -> "${cleanSuggestion.suggestedText}"`);
+          
+        } catch (error) {
+          console.error(`❌ [Firebase] Error preparing suggestion ${index}:`, error);
+        }
+      });
+      
+      try {
+        await batch.commit();
+        console.log(`✅ [Firebase] Successfully wrote ${successCount} suggestions to Firestore`);
+        logger.info(`[Firebase] Wrote ${successCount} suggestions to Firestore for document ${documentId}`);
+      } catch (error) {
+        console.error('❌ [Firebase] Error writing suggestions to Firestore:', error);
+        throw error;
+      }
+    } else {
+      console.log('🔍 [Firebase] No suggestions to write:', {
+        hasDocumentId: !!documentId,
+        hasUserId: !!userId,
+        suggestionsLength: suggestions.length
+      });
+    }
+
+    // Cache the result unless bypassed or suggestions empty
+    if (!bypassCache && suggestions.length > 0) {
+      await cacheService.setCachedAnalysis(cacheKey, userId, { suggestions }, {
+        documentId,
+        contextType: contextWindow ? 'contextWindow' : 'full',
+        tokenCount,
+        paragraphCount: Array.isArray(contextWindow) ? contextWindow.length : content.split('\n\n').length,
+        writingGoalsHash: writingGoals ? cacheService.simpleHash(JSON.stringify(writingGoals)) : 'none'
+      });
+    }
+
+    responseMetadata.processingTime = Date.now() - startTime;
+    
+    console.log('📊 [Firebase] Analysis metadata:', responseMetadata);
+    
+    return {
+      metadata: responseMetadata,
+      message: `${suggestions.length} suggestions are being processed.`,
+    };
+
+  } catch (error) {
+    responseMetadata.processingTime = Date.now() - startTime;
+    console.error('❌ [Firebase] analyzeSuggestions error:', error);
+    
+    if (error instanceof Error) {
+      throw new Error(`Analysis failed: ${error.message}`);
+    } else {
+      throw new Error('Analysis failed: Unknown error occurred');
+    }
   }
 });
 
@@ -657,10 +872,11 @@ async function generateMockStructureAnalysis(
   assignmentType: string,
   academicLevel: string
 ) {
-  const sections = [];
+  const sections: any[] = [];
   const paragraphs = content.split(/\n+/).filter(p => p.trim().length > 20);
   let currentIndex = 0;
   let prevParagraph: string | null = null;
+  let thesisFound = false;
   
   for (let i = 0; i < paragraphs.length; i++) {
     const paragraph = paragraphs[i];
@@ -668,36 +884,97 @@ async function generateMockStructureAnalysis(
     const endIndex = startIndex + paragraph.length;
     currentIndex = endIndex;
     
-    let type: "introduction" | "thesis" | "body-paragraph" | "conclusion" | "transition" = "body-paragraph";
-    if (i === 0) type = "introduction";
-    if (i === paragraphs.length - 1 && paragraphs.length > 1) type = "conclusion";
-    
-    // Simple thesis detection
-    const thesisKeywords = ["this essay will", "i will argue", "the purpose of this paper"];
-    if (i === 0 && thesisKeywords.some(k => paragraph.toLowerCase().includes(k))) {
-      type = "thesis";
+    // --- Detect thesis presence ------------------------------------------------
+    const thesisKeywords = [
+      "this essay will",
+      "this essay argues",
+      "this essay aims",
+      "in this essay",
+      "i will argue",
+      "i argue that",
+      "we argue that",
+      "the purpose of this paper",
+      "this paper argues",
+      "this paper will",
+      "my thesis is",
+      "our thesis is that",
+      "the thesis of this essay",
+      "the thesis of this paper",
+      "the main objective of this essay",
+      "overall, this essay"
+    ];
+
+    const paragraphLower = paragraph.toLowerCase();
+    const containsThesisKeyword = thesisKeywords.some(k => paragraphLower.includes(k));
+
+    const thesisPattern = /(should|must|needs to|ought to|have to|will|is|are)\s+.*\b(because|since|as|therefore)\b/i;
+
+    const isThesisCandidate = containsThesisKeyword || thesisPattern.test(paragraph);
+
+    // --- Determine section types for this paragraph ---------------------------
+    const paragraphTypes: ("introduction" | "thesis" | "body-paragraph" | "conclusion" | "transition")[] = [];
+
+    if (i === 0) {
+      paragraphTypes.push("introduction");
+    } else if (i === paragraphs.length - 1 && paragraphs.length > 1) {
+      paragraphTypes.push("conclusion");
+    } else {
+      paragraphTypes.push("body-paragraph");
     }
 
+    if (isThesisCandidate && !thesisFound) {
+      paragraphTypes.push("thesis");
+      thesisFound = true;
+    }
+
+    // --- Generate sections for each type --------------------------------------
     const transitionQuality = analyzeTransitionQuality(paragraph, prevParagraph, academicLevel);
-    
-    sections.push({
-      id: `sec_${i}`,
-      type,
-      startIndex,
-      endIndex,
-      text: paragraph,
-      confidence: Math.random() * 0.2 + 0.8,
-      metadata: {
-        paragraphNumber: i + 1,
-        transitionQuality,
-      },
-      suggestions: generateTransitionSuggestions(transitionQuality, academicLevel, type),
+
+    paragraphTypes.forEach((typeLabel) => {
+      let thesisSentence: string | undefined;
+      let sectionStart = startIndex;
+      let sectionEnd = endIndex;
+
+      // If this is a thesis section that shares the paragraph with the introduction,
+      // narrow the range to just the thesis sentence for more precise highlighting.
+      if (typeLabel === "thesis") {
+        const sentences = paragraph.match(/[^.!?]+[.!?]?/g) || [paragraph];
+        const foundSentenceCandidate = sentences.find((sentence) => {
+          const sentenceLower = sentence.toLowerCase();
+          return thesisKeywords.some(k => sentenceLower.includes(k)) || thesisPattern.test(sentence);
+        });
+        thesisSentence = foundSentenceCandidate;
+        if (!thesisSentence) {
+          // fallback: choose the longest sentence (often thesis)
+          thesisSentence = sentences.reduce((a, b) => (b.length > a.length ? b : a), sentences[0]);
+        }
+        const relativeStart = paragraph.indexOf(thesisSentence!);
+        sectionStart = startIndex + relativeStart;
+        sectionEnd = sectionStart + thesisSentence!.length;
+      }
+
+      const sectionText = (typeLabel === "thesis" && thesisSentence) ? thesisSentence.trim() : paragraph;
+
+      sections.push({
+        id: `sec_${i}_${typeLabel}`,
+        type: typeLabel,
+        startIndex: sectionStart,
+        endIndex: sectionEnd,
+        text: sectionText,
+        confidence: Math.random() * 0.2 + 0.8,
+        metadata: {
+          paragraphNumber: i + 1,
+          transitionQuality,
+        },
+        suggestions: generateTransitionSuggestions(transitionQuality, academicLevel, typeLabel),
+      });
     });
+
     prevParagraph = paragraph;
   }
   
   const hasIntroduction = sections.some(s => s.type === "introduction");
-  const hasThesis = sections.some(s => s.type === "thesis");
+  const hasThesis = thesisFound;
   const hasConclusion = sections.some(s => s.type === "conclusion");
   const bodyParagraphCount = sections.filter(s => s.type === "body-paragraph").length;
   
@@ -721,8 +998,8 @@ async function generateMockStructureAnalysis(
     },
   };
   
-  const structureSuggestions = sections.flatMap((section, index) => {
-    return section.suggestions?.map((explanation, sugIndex) => ({
+  const structureSuggestions = sections.flatMap((section: any, index: number) => {
+    return (section.suggestions as string[] | undefined)?.map((explanation: string, sugIndex: number) => ({
       id: `sug_struct_${index}_${sugIndex}`,
         documentId,
         userId,
@@ -733,7 +1010,8 @@ async function generateMockStructureAnalysis(
       suggestedText: section.text.substring(0, 50) + "...",
       explanation,
       startIndex: section.startIndex,
-      endIndex: section.endIndex
+      endIndex: section.endIndex,
+      confidence: 0.8 // Ensure structure suggestions have confidence
     })) || [];
   });
   
@@ -873,6 +1151,95 @@ export const analyzeWithRubric = onCall(commonOptions, async (request) => {
   }
 });
 
+
+/**
+ * ===================================================================
+ *                    FUNCTION WARMING SERVICE
+ * ===================================================================
+ */
+
+// Health check endpoint to keep functions warm - HTTP function for Cloud Scheduler
+export const pingHealth = onRequest(corsOptions, async (req: Request, res: Response) => {
+  const timestamp = Date.now();
+  const response = {
+    status: 'warm',
+    timestamp,
+    message: 'Function is ready',
+    version: '1.0.0',
+    method: req.method
+  };
+  res.json(response);
+});
+
+// Specific health checks for each main function to keep them warm
+export const pingAnalyzeSuggestions = onRequest(corsOptions, async (req: Request, res: Response) => {
+  const timestamp = Date.now();
+  const response = {
+    function: 'analyzeSuggestions',
+    status: 'warm',
+    timestamp,
+    ready: true,
+    method: req.method
+  };
+  res.json(response);
+});
+
+export const pingAnalyzeEssayStructure = onRequest(corsOptions, async (req: Request, res: Response) => {
+  const timestamp = Date.now();
+  const response = {
+    function: 'analyzeEssayStructure',
+    status: 'warm',
+    timestamp,
+    ready: true,
+    method: req.method
+  };
+  res.json(response);
+});
+
+export const pingParseAssignmentRubric = onRequest(corsOptions, async (req: Request, res: Response) => {
+  const timestamp = Date.now();
+  const response = {
+    function: 'parseAssignmentRubric',
+    status: 'warm',
+    timestamp,
+    ready: true,
+    method: req.method
+  };
+  res.json(response);
+});
+
+export const pingAnalyzeWithRubric = onRequest(corsOptions, async (req: Request, res: Response) => {
+  const timestamp = Date.now();
+  const response = {
+    function: 'analyzeWithRubric',
+    status: 'warm',
+    timestamp,
+    ready: true,
+    method: req.method
+  };
+  res.json(response);
+});
+
+// Comprehensive warmup function that pings all main functions
+export const pingAllFunctions = onRequest(corsOptions, async (req: Request, res: Response) => {
+  const timestamp = Date.now();
+  const functions = [
+    'analyzeSuggestions',
+    'analyzeEssayStructure', 
+    'parseAssignmentRubric',
+    'analyzeWithRubric'
+  ];
+  
+  const response = {
+    status: 'all-functions-warm',
+    timestamp,
+    functions,
+    message: 'All main functions are ready and warm',
+    count: functions.length,
+    method: req.method
+  };
+  res.json(response);
+});
 
 /**
  * ===================================================================

@@ -234,13 +234,6 @@ const MyDocuments: React.FC = () => {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <button
-              onClick={() => navigate('/editor')}
-              className="warm-button flex items-center px-6 py-3"
-            >
-              <Plus className="h-5 w-5 mr-2" />
-              New Document
-            </button>
           </div>
         </div>
 
@@ -388,7 +381,7 @@ const MyDocuments: React.FC = () => {
             </p>
             {!searchTerm && (
               <button
-                onClick={() => navigate('/editor')}
+                onClick={handleCreateNew}
                 className="warm-button px-8 py-4 text-lg flex items-center mx-auto"
               >
                 <Plus className="h-6 w-6 mr-3" />

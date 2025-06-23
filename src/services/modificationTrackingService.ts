@@ -1,8 +1,268 @@
-import { collection, doc, getDocs, query, where, orderBy, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { collection, doc, getDocs, getDoc, query, where, orderBy, setDoc, updateDoc, arrayUnion, FieldValue, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { ModifiedArea, Suggestion } from '../types/suggestion';
+import { contentAnalysisService } from './contentAnalysisService';
+import type { ContentChange } from './contentAnalysisService';
+
+// ✅ DIFFERENTIAL ANALYSIS - Document Change Record Type
+interface DocumentChangeRecord {
+  id?: string;
+  documentId: string;
+  userId: string;
+  changes: ParagraphChange[];
+  analyzed: boolean;
+  createdAt: Date;
+  analysisId?: string;
+}
+
+interface ParagraphChange {
+  paragraphIndex: number;
+  oldHash: string;
+  newHash: string;
+  oldText: string;
+  newText: string;
+  changeType: 'added' | 'modified' | 'deleted';
+  timestamp: number;
+}
 
 export const modificationTrackingService = {
+  // ✅ DIFFERENTIAL ANALYSIS - Track paragraph-level changes for differential analysis
+  async trackParagraphChanges(
+    documentId: string, 
+    userId: string, 
+    oldContent: string, 
+    newContent: string
+  ): Promise<ContentChange[]> {
+    try {
+      console.log('🔍 [DifferentialAnalysis] Tracking paragraph changes:', {
+        documentId,
+        userId,
+        oldLength: oldContent.length,
+        newLength: newContent.length
+      });
+
+      // Detect changed paragraphs using contentAnalysisService
+      const changes = contentAnalysisService.detectChangedParagraphs(oldContent, newContent);
+      
+      if (changes.length === 0) {
+        console.log('🔍 [DifferentialAnalysis] No paragraph changes detected');
+        return [];
+      }
+
+      // Create paragraph change records
+      const paragraphChanges: ParagraphChange[] = changes.map(change => ({
+        paragraphIndex: change.index,
+        oldHash: this.hashParagraph(change.oldText),
+        newHash: this.hashParagraph(change.newText),
+        oldText: change.oldText,
+        newText: change.newText,
+        changeType: change.type,
+        timestamp: Date.now()
+      }));
+
+      // Store the change record in Firestore
+      const changeRecord: DocumentChangeRecord = {
+        documentId,
+        userId,
+        changes: paragraphChanges,
+        analyzed: false,
+        createdAt: new Date()
+      };
+
+      const changeRef = doc(collection(db, 'documentChanges'));
+      
+      console.log('🔍 [DifferentialAnalysis] About to save change record:', {
+        documentId,
+        userId,
+        changesCount: paragraphChanges.length,
+        analyzed: false
+      });
+
+      try {
+        await setDoc(changeRef, {
+          ...changeRecord,
+          createdAt: serverTimestamp()
+        });
+
+        console.log('🔍 [DifferentialAnalysis] ✅ Change record saved to Firestore:', {
+          recordId: changeRef.id,
+          changesCount: changes.length,
+          changeTypes: changes.map(c => c.type),
+          path: changeRef.path,
+          documentId: changeRecord.documentId,
+          userId: changeRecord.userId
+        });
+      } catch (saveError) {
+        console.error('🔍 [DifferentialAnalysis] ❌ FAILED to save change record:', saveError);
+        throw saveError;
+      }
+
+      // Verify the record was saved by immediately querying it back
+      try {
+        await new Promise(resolve => setTimeout(resolve, 100)); // Small delay for consistency
+        const verifyDoc = await getDoc(changeRef);
+        console.log('🔍 [DifferentialAnalysis] Record verification:', {
+          exists: verifyDoc.exists(),
+          docId: changeRef.id,
+          data: verifyDoc.exists() ? verifyDoc.data() : null
+        });
+        
+        if (!verifyDoc.exists()) {
+          console.error('🔍 [DifferentialAnalysis] ❌ CRITICAL: Record was not saved despite success!');
+        }
+      } catch (verifyError) {
+        console.error('🔍 [DifferentialAnalysis] Error verifying saved record:', verifyError);
+      }
+
+      return changes;
+    } catch (error) {
+      console.error('🔍 [DifferentialAnalysis] Error tracking paragraph changes:', error);
+      // Return empty array to allow system to continue without differential tracking
+      return [];
+    }
+  },
+
+  // ✅ DIFFERENTIAL ANALYSIS - Get unanalyzed changes for differential processing
+  async getUnanalyzedChanges(documentId: string, userId: string): Promise<DocumentChangeRecord[]> {
+    try {
+      console.log('🔍 [DifferentialAnalysis] Getting unanalyzed changes:', { documentId, userId });
+
+      const q = query(
+        collection(db, 'documentChanges'),
+        where('documentId', '==', documentId),
+        where('userId', '==', userId),
+        where('analyzed', '==', false)
+        // Temporarily removing orderBy until index builds
+        // orderBy('createdAt', 'desc')
+      );
+
+      console.log('🔍 [DifferentialAnalysis] About to execute query on documentChanges collection...');
+      
+      const snapshot = await getDocs(q);
+      
+      console.log('🔍 [DifferentialAnalysis] Query executed:', {
+        docsFound: snapshot.docs.length,
+        isEmpty: snapshot.empty,
+        size: snapshot.size
+      });
+
+      // Log all documents found (even if analyzed=true) for debugging
+      const allDocs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        data: doc.data()
+      }));
+      console.log('🔍 [DifferentialAnalysis] All documents in query result:', allDocs);
+
+      const changes = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date()
+      })) as DocumentChangeRecord[];
+
+      console.log('🔍 [DifferentialAnalysis] Found unanalyzed changes:', {
+        count: changes.length,
+        totalParagraphChanges: changes.reduce((sum, change) => sum + change.changes.length, 0),
+        changeDetails: changes.map(c => ({ id: c.id, analyzed: c.analyzed, documentId: c.documentId, userId: c.userId }))
+      });
+
+      return changes;
+    } catch (error) {
+      console.error('🔍 [DifferentialAnalysis] ❌ CRITICAL ERROR getting unanalyzed changes:', error);
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        code: (error as any)?.code,
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      return [];
+    }
+  },
+
+  // ✅ DIFFERENTIAL ANALYSIS - Mark changes as analyzed
+  async markChangesAsAnalyzed(changeRecordIds: string[], analysisId: string): Promise<void> {
+    try {
+      console.log('🔍 [DifferentialAnalysis] Marking changes as analyzed:', {
+        recordIds: changeRecordIds,
+        analysisId
+      });
+
+      const updatePromises = changeRecordIds.map(async (recordId) => {
+        const changeRef = doc(db, 'documentChanges', recordId);
+        await updateDoc(changeRef, {
+          analyzed: true,
+          analysisId: analysisId,
+          analyzedAt: serverTimestamp()
+        });
+      });
+
+      await Promise.all(updatePromises);
+      console.log('🔍 [DifferentialAnalysis] Successfully marked changes as analyzed');
+    } catch (error) {
+      console.error('🔍 [DifferentialAnalysis] Error marking changes as analyzed:', error);
+      throw error;
+    }
+  },
+
+  // ✅ DIFFERENTIAL ANALYSIS - Clean up old change records (older than 7 days)
+  async cleanupOldChangeRecords(documentId: string, userId: string): Promise<void> {
+    try {  
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const q = query(
+        collection(db, 'documentChanges'),
+        where('documentId', '==', documentId),
+        where('userId', '==', userId),
+        where('createdAt', '<', sevenDaysAgo)
+      );
+
+      const snapshot = await getDocs(q);
+      const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
+      
+      await Promise.all(deletePromises);
+      
+      if (snapshot.docs.length > 0) {
+        console.log('🔍 [DifferentialAnalysis] Cleaned up old change records:', {
+          deletedCount: snapshot.docs.length
+        });
+      }
+    } catch (error) {
+      console.error('🔍 [DifferentialAnalysis] Error cleaning up old change records:', error);
+    }
+  },
+
+  // ✅ DIFFERENTIAL ANALYSIS - Generate hash for paragraph content
+  hashParagraph(text: string): string {
+    if (!text || text.trim() === '') return '';
+    
+    // Simple hash function for paragraph content
+    let hash = 0;
+    const normalizedText = text.trim().toLowerCase();
+    for (let i = 0; i < normalizedText.length; i++) {
+      const char = normalizedText.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return Math.abs(hash).toString(16);
+  },
+
+  // ✅ DIFFERENTIAL ANALYSIS - Check if document has unanalyzed changes
+  async hasUnanalyzedChanges(documentId: string, userId: string): Promise<boolean> {
+    try {
+      console.log('🔍 [DifferentialAnalysis] Checking for unanalyzed changes:', { documentId, userId });
+      const unanalyzedChanges = await this.getUnanalyzedChanges(documentId, userId);
+      const hasChanges = unanalyzedChanges.length > 0;
+      console.log('🔍 [DifferentialAnalysis] Has unanalyzed changes result:', {
+        hasChanges,
+        changesCount: unanalyzedChanges.length,
+        changeIds: unanalyzedChanges.map(c => c.id)
+      });
+      return hasChanges;
+    } catch (error) {
+      console.error('🔍 [DifferentialAnalysis] Error checking unanalyzed changes:', error);
+      return false;
+    }
+  },
+
   // Get previously modified areas for a document
   async getModifiedAreas(documentId: string, userId: string): Promise<ModifiedArea[]> {
     try {

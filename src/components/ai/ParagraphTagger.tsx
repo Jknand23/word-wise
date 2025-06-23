@@ -6,6 +6,7 @@ interface ParagraphTaggerProps {
   documentId: string;
   userId: string;
   content: string;
+  fullDocumentContent: string;
   paragraphIndex: number;
   onTagUpdate?: () => void;
 }
@@ -14,6 +15,7 @@ const ParagraphTagger: React.FC<ParagraphTaggerProps> = ({
   documentId,
   userId,
   content,
+  fullDocumentContent,
   paragraphIndex,
   onTagUpdate
 }) => {
@@ -69,7 +71,7 @@ const ParagraphTagger: React.FC<ParagraphTaggerProps> = ({
 
   const handleCreateTag = async (tagType: 'needs-review' | 'done') => {
     try {
-      await createTag(documentId, userId, paragraphIndex, content, tagType);
+      await createTag(documentId, userId, paragraphIndex, fullDocumentContent, tagType);
       setShowMenu(false);
       onTagUpdate?.();
     } catch (error) {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, FileText, Trash2, CheckCircle, AlertCircle, Loader, Edit } from 'lucide-react';
+import { X, FileText, Trash2, CheckCircle, AlertCircle, Loader, Edit } from 'lucide-react';
 import { rubricService } from '../../services/rubricService';
 import StructuredRubricForm from './StructuredRubricForm';
 import type { AssignmentRubric, RubricCriterion } from '../../types/suggestion';
@@ -20,9 +20,6 @@ const RubricManager: React.FC<RubricManagerProps> = ({
   const [rubrics, setRubrics] = useState<AssignmentRubric[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [addFormType, setAddFormType] = useState<'text' | 'structured'>('structured');
-  const [newRubricText, setNewRubricText] = useState('');
-  const [newRubricTitle, setNewRubricTitle] = useState('');
   const [isParsingRubric, setIsParsingRubric] = useState(false);
   const [selectedRubric, setSelectedRubric] = useState<AssignmentRubric | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,39 +38,6 @@ const RubricManager: React.FC<RubricManagerProps> = ({
       setError('Failed to load rubrics');
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handleAddTextRubric = async () => {
-    if (!newRubricText.trim()) {
-      setError('Please enter the assignment prompt or rubric text');
-      return;
-    }
-
-    try {
-      setIsParsingRubric(true);
-      setError(null);
-      
-      const parsedRubric = await rubricService.parseRubricText(
-        newRubricText,
-        documentId,
-        userId,
-        newRubricTitle || 'Assignment Rubric'
-      );
-      
-      setRubrics(prev => [parsedRubric, ...prev]);
-      setShowAddForm(false);
-      setNewRubricText('');
-      setNewRubricTitle('');
-      
-      // Auto-select the newly created rubric
-      setSelectedRubric(parsedRubric);
-      onRubricSelect?.(parsedRubric);
-    } catch (error) {
-      console.error('Failed to parse rubric:', error);
-      setError('Failed to parse rubric. Please check the format and try again.');
-    } finally {
-      setIsParsingRubric(false);
     }
   };
 
@@ -174,22 +138,13 @@ const RubricManager: React.FC<RubricManagerProps> = ({
       <div className="flex items-center justify-between p-4 border-b">
         <h2 className="text-lg font-semibold text-gray-900">Assignment Rubrics</h2>
         <div className="flex items-center gap-2">
-          <div className="flex items-center border border-gray-300 rounded-md">
-            <button
-              onClick={() => { setAddFormType('structured'); setShowAddForm(true); }}
-              className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-l-md hover:bg-blue-700"
-            >
-              <Edit className="w-4 h-4" />
-              Create Rubric
-            </button>
-            <button
-              onClick={() => { setAddFormType('text'); setShowAddForm(true); }}
-              className="flex items-center gap-1 px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-r-md hover:bg-gray-200 border-l border-gray-300"
-            >
-              <Plus className="w-4 h-4" />
-              Paste Text
-            </button>
-          </div>
+          <button
+            onClick={() => setShowAddForm(true)}
+            className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+          >
+            <Edit className="w-4 h-4" />
+            Create Rubric
+          </button>
           {onClose && (
             <button
               onClick={onClose}
@@ -219,72 +174,14 @@ const RubricManager: React.FC<RubricManagerProps> = ({
 
       {/* Add Rubric Forms */}
       {showAddForm && (
-        <>
-          {addFormType === 'structured' ? (
-            <div className="border-b">
-              <StructuredRubricForm
-                documentId={documentId}
-                userId={userId}
-                onSave={handleSaveStructuredRubric}
-                onCancel={() => setShowAddForm(false)}
-              />
-            </div>
-          ) : (
-            <div className="p-4 border-b bg-gray-50">
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Rubric Title (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={newRubricTitle}
-                    onChange={(e) => setNewRubricTitle(e.target.value)}
-                    placeholder="e.g., Essay Assignment #1"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Assignment Prompt or Rubric
-                  </label>
-                  <textarea
-                    value={newRubricText}
-                    onChange={(e) => setNewRubricText(e.target.value)}
-                    placeholder="Paste your assignment prompt or grading rubric here..."
-                    rows={6}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleAddTextRubric}
-                    disabled={isParsingRubric || !newRubricText.trim()}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {isParsingRubric ? (
-                      <>
-                        <Loader className="w-4 h-4 animate-spin" />
-                        Parsing...
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="w-4 h-4" />
-                        Parse Rubric
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setShowAddForm(false)}
-                    className="px-4 py-2 text-gray-600 bg-gray-200 rounded-md hover:bg-gray-300"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </>
+        <div className="border-b">
+          <StructuredRubricForm
+            documentId={documentId}
+            userId={userId}
+            onSave={handleSaveStructuredRubric}
+            onCancel={() => setShowAddForm(false)}
+          />
+        </div>
       )}
 
       {/* Rubrics List */}

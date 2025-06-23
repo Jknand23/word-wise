@@ -1,10 +1,15 @@
 import React, { useState } from 'react';
-import { Tag, AlertCircle, CheckCircle, X } from 'lucide-react';
+import { Tag, AlertCircle, CheckCircle, X, Filter as FilterIcon } from 'lucide-react';
 import { useParagraphTagStore } from '../../stores/paragraphTagStore';
 
-const ParagraphTaggingControls: React.FC = () => {
+interface ControlsProps { documentId: string; userId: string; }
+
+const ParagraphTaggingControls: React.FC<ControlsProps> = ({ documentId, userId }) => {
   const {
     tags,
+    filteredByTag,
+    setFilter,
+    clearAllTags,
     isLoading,
     error
   } = useParagraphTagStore();
@@ -16,6 +21,26 @@ const ParagraphTaggingControls: React.FC = () => {
 
   const handleDismissError = () => {
     setShowError(false);
+  };
+
+  const handleReset = async () => {
+    try {
+      await clearAllTags(documentId, userId);
+    } catch (error) {
+      console.error('Error resetting tags:', error);
+    }
+  };
+
+  const baseButtonClass = 'px-3 h-7 text-xs font-semibold rounded-full transition-colors duration-200 whitespace-nowrap flex items-center shadow-sm';
+
+  const getFilterButtonClass = (tagType: 'all' | 'needs-review' | 'done') => {
+    const inactive = `${baseButtonClass} bg-gray-100 text-gray-600 hover:bg-gray-200`;
+    const activeMap: Record<string,string> = {
+      'all': `${baseButtonClass} bg-blue-600 text-white`,
+      'needs-review': `${baseButtonClass} bg-yellow-500 text-white`,
+      'done': `${baseButtonClass} bg-green-600 text-white`,
+    };
+    return filteredByTag === tagType ? activeMap[tagType] : inactive;
   };
 
   return (
@@ -39,33 +64,39 @@ const ParagraphTaggingControls: React.FC = () => {
         </div>
       )}
 
-      {/* Controls Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Tag className="w-4 h-4 text-gray-600" />
-          <h3 className="text-sm font-medium text-gray-700">Paragraph Tags</h3>
-          {isLoading && (
-            <div className="w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
-          )}
-        </div>
+      {/* Header Row with Title, Filters, and Reset */}
+      <div className="flex flex-wrap items-center gap-3">
+        <Tag className="w-4 h-4 text-gray-600" />
+        <h3 className="text-sm font-medium text-gray-700">Paragraph Tags</h3>
+        {isLoading && <div className="w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin" />}
+
+        {/* Filters */}
+        <FilterIcon className="w-4 h-4 text-gray-400 ml-2" />
+        <button onClick={() => setFilter('all')} className={getFilterButtonClass('all')}>
+          All ({tags.length})
+        </button>
+        <button onClick={() => setFilter('needs-review')} className={getFilterButtonClass('needs-review')}>
+          <AlertCircle className="w-3 h-3 mr-1" /> Review ({needsReviewCount})
+        </button>
+        <button onClick={() => setFilter('done')} className={getFilterButtonClass('done')}>
+          <CheckCircle className="w-3 h-3 mr-1" /> Done ({doneCount})
+        </button>
+
+        {/* Reset */}
+        <button
+          onClick={handleReset}
+          className="ml-auto px-3 h-7 text-xs font-semibold rounded-full border bg-red-50 border-red-300 text-red-600 hover:bg-red-100 whitespace-nowrap"
+          disabled={tags.length === 0}
+        >
+          Reset Tags
+        </button>
       </div>
 
       {/* Tag Statistics */}
-      <div className="flex items-center gap-4 text-sm text-gray-600">
-        <div className="flex items-center gap-1">
-          <span className="font-medium">{tags.length}</span>
-          <span>total</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <AlertCircle className="w-3 h-3 text-yellow-600" />
-          <span className="font-medium">{needsReviewCount}</span>
-          <span>need review</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <CheckCircle className="w-3 h-3 text-green-600" />
-          <span className="font-medium">{doneCount}</span>
-          <span>done</span>
-        </div>
+      <div className="flex items-center gap-4 text-xs text-gray-500 mt-2">
+        <span>{tags.length} total</span>
+        <span>{needsReviewCount} need review</span>
+        <span>{doneCount} done</span>
       </div>
     </div>
   );

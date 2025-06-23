@@ -18,12 +18,13 @@ const DocumentEditor: React.FC = () => {
   const { documentId } = useParams<{ documentId: string }>();
   const navigate = useNavigate();
   const { user, isLoading: isAuthLoading } = useAuthStore();
-  const { setActiveDocument, clearSuggestions, error: suggestionError, setError, suggestions, rejectSuggestion, requestAnalysis } = useSuggestionStore();
+  const { setActiveDocument, clearSuggestions, error: suggestionError, setError, suggestions, rejectSuggestion, acceptSuggestion, requestAnalysis } = useSuggestionStore();
   const { goals } = useWritingGoalsStore();
   const [documentTitle, setDocumentTitle] = useState('Untitled Document');
   const [documentContent, setDocumentContent] = useState('');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [selectedSuggestion, setSelectedSuggestion] = useState<Suggestion | null>(null);
   const [highlightsVisible, setHighlightsVisible] = useState<boolean>(true);
 
@@ -43,25 +44,93 @@ const DocumentEditor: React.FC = () => {
   
   // Track if we just created a new document to prevent unnecessary reloads
   const justCreatedRef = useRef<boolean>(false);
+  
+  // Track if there are unsaved changes
+  const hasUnsavedChangesRef = useRef<boolean>(false);
 
-  console.log('DocumentEditor component render:', {
+  // 🔍 DEBUG: Log component state on every render
+  console.log('🏠 [DocumentEditor] Component render:', {
     documentId,
+    isAuthLoading,
+    'user?.uid': user?.uid,
+    'suggestions.length': suggestions.length,
     currentDocumentId,
-    userEmail: user?.email,
-    isAuthLoading
+    timestamp: new Date().toISOString()
   });
+
+  // 🔍 DEBUG: Check subscription state from store
+  const { activeDocumentId, unsubscribe: hasUnsubscribe } = useSuggestionStore();
+  console.log('🔍 [DocumentEditor] Subscription state check:', {
+    activeDocumentIdFromStore: activeDocumentId,
+    hasUnsubscribeFunction: !!hasUnsubscribe,
+    shouldHaveSubscription: !!(user?.uid && (currentDocumentId || documentId))
+  });
+
+  // 🔍 DEBUG: Force subscription if missing
+  React.useEffect(() => {
+    const docIdToUse = currentDocumentId || (documentId !== 'new' ? documentId : null);
+    const shouldHaveSubscription = !!(user?.uid && docIdToUse);
+    const hasSubscription = !!(hasUnsubscribe && activeDocumentId === docIdToUse);
+    
+    console.log('🔍 [DocumentEditor] FORCE CHECK useEffect:', {
+      shouldHaveSubscription,
+      hasSubscription,
+      activeDocumentId,
+      docIdToUse,
+      'user?.uid': user?.uid
+    });
+    
+    if (shouldHaveSubscription && !hasSubscription) {
+      console.log('🔍 [DocumentEditor] FORCE SETTING UP MISSING SUBSCRIPTION:', {
+        docIdToUse,
+        userId: user?.uid
+      });
+      setActiveDocument(docIdToUse, user.uid);
+    }
+  }); // Run on every render to catch missing subscriptions
+
+  // Component render tracking removed for cleaner console
   
   // Subscribe to document suggestions when the component mounts
   useEffect(() => {
-    if (user?.uid && currentDocumentId) {
-      setActiveDocument(currentDocumentId, user.uid);
+    console.log('🔍 [DocumentEditor] Subscription useEffect TRIGGERED!');
+    console.log('🔍 [DocumentEditor] Subscription setup check:', {
+      'user?.uid': user?.uid,
+      currentDocumentId,
+      documentId,
+      'hasUser': !!user?.uid,
+      'hasCurrentDocumentId': !!currentDocumentId,
+      'shouldSetupSubscription': !!(user?.uid && currentDocumentId)
+    });
+    
+    // Use currentDocumentId if available, otherwise fall back to documentId from URL
+    const docIdToUse = currentDocumentId || (documentId !== 'new' ? documentId : null);
+    
+    console.log('🔍 [DocumentEditor] docIdToUse calculated:', { docIdToUse, documentId, currentDocumentId });
+    
+    if (user?.uid && docIdToUse) {
+      console.log('🔍 [DocumentEditor] ✅ SETTING UP SUBSCRIPTION for:', { 
+        docIdToUse, 
+        userId: user.uid,
+        source: currentDocumentId ? 'currentDocumentId' : 'documentId' 
+      });
+      setActiveDocument(docIdToUse, user.uid);
+    } else {
+      console.log('🔍 [DocumentEditor] ❌ SKIPPING subscription setup - missing requirements:', {
+        hasUser: !!user?.uid,
+        hasDocId: !!docIdToUse,
+        documentId,
+        currentDocumentId,
+        userUid: user?.uid
+      });
     }
     
     // Cleanup subscription on unmount
     return () => {
+      console.log('🔍 [DocumentEditor] Cleaning up subscription');
       clearSuggestions();
     };
-  }, [currentDocumentId, user?.uid, setActiveDocument]);
+  }, [currentDocumentId, documentId, user?.uid, setActiveDocument]);
 
   // Track quality metrics when new suggestions arrive
   useEffect(() => {
@@ -89,26 +158,66 @@ const DocumentEditor: React.FC = () => {
     }
   }, [suggestions, user?.uid, currentDocumentId, documentContent, documentTitle]);
 
+  // ✅ ADD: Handle page unload to ensure auto-save completes
   useEffect(() => {
-    console.log('DocumentEditor useEffect triggered:', {
-      documentId,
-      currentDocumentId,
-      userUid: user?.uid,
-      justCreated: justCreatedRef.current
-    });
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChangesRef.current) {
+        // Clear any pending timeout
+        if (autoSaveTimeoutRef.current) {
+          clearTimeout(autoSaveTimeoutRef.current);
+        }
+        
+        // Show warning to user about unsaved changes
+        try {
+          e.preventDefault();
+          e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+          return 'You have unsaved changes. Are you sure you want to leave?';
+        } catch (error) {
+          console.error('Failed to show warning on beforeunload:', error);
+        }
+      }
+    };
 
+    const handleVisibilityChange = () => {
+      if (document.hidden && hasUnsavedChangesRef.current) {
+        // Clear the timeout and save immediately
+        if (autoSaveTimeoutRef.current) {
+          clearTimeout(autoSaveTimeoutRef.current);
+        }
+        // Force immediate save when tab becomes hidden
+        handleSave().then(() => {
+          hasUnsavedChangesRef.current = false;
+        }).catch(error => {
+          console.error('Failed to save on visibility change:', error);
+        });
+      }
+    };
 
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    // Prevent loading if already loading
+    if (isLoading) {
+      return;
+    }
 
     if (documentId === 'new') {
-      console.log('Setting up new document - resetting title to "New Document"');
+      // Setup new document - reset all state
       setDocumentTitle('New Document');
       setDocumentContent('');
-      setCurrentDocumentId(null); // Reset for new document
+      setCurrentDocumentId(null);
+      setLastSaved(null);
       justCreatedRef.current = false;
     } else if (documentId && user?.uid) {
       // Don't reload if we just created this document
       if (justCreatedRef.current && currentDocumentId === documentId) {
-        console.log('Skipping load for just-created document:', documentId);
         justCreatedRef.current = false;
         return;
       }
@@ -116,71 +225,65 @@ const DocumentEditor: React.FC = () => {
       // Only load document data if we don't already have the current document ID
       // This prevents reloading when we navigate after creating a new document
       if (currentDocumentId !== documentId) {
-        console.log('Loading document data for:', documentId, 'current was:', currentDocumentId);
         loadDocumentData(documentId);
-      } else {
-        console.log('Document already loaded, skipping load for:', documentId);
       }
-    } else {
-      console.log('Not loading document - missing conditions:', { 
-        hasDocumentId: !!documentId, 
-        hasUser: !!user?.uid 
-      });
     }
-  }, [documentId, user?.uid]); // Removed currentDocumentId from dependencies to prevent loops
+  }, [documentId, user?.uid, isLoading]);
 
   const loadDocumentData = async (docId: string) => {
     if (!user?.uid) return;
     
+    // Clear existing content first to prevent duplication
+    setDocumentTitle('');
+    setDocumentContent('');
+    setLastSaved(null);
+    
+    // Set loading state to prevent overlapping loads
+    setIsLoading(true);
+    
     try {
-      console.log('Loading document data for ID:', docId);
       const document = await documentService.getDocument(docId, user.uid);
       if (document) {
-        console.log('Loaded document:', { title: document.title, contentLength: document.content.length });
         setDocumentTitle(document.title);
         setDocumentContent(document.content);
         setLastSaved(document.updatedAt);
-        setCurrentDocumentId(docId); // Set current document ID after successful load
+        setCurrentDocumentId(docId);
       } else {
-        console.log('Document not found:', docId);
         setDocumentTitle('Document Not Found');
         setDocumentContent('The requested document could not be found.');
+        setCurrentDocumentId(docId); // Set ID even for not found to prevent repeated attempts
       }
     } catch (error) {
       console.error('Failed to load document:', error);
       setDocumentTitle('Error Loading Document');
       setDocumentContent('Failed to load document. Please try again.');
+      setCurrentDocumentId(docId); // Set ID even for errors to prevent repeated attempts
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (overrideContent?: string, overrideTitle?: string) => {
     if (!user?.uid) return;
     
     // Prevent multiple simultaneous saves
     if (isSaving) {
-      console.log('Save already in progress, skipping...');
       return;
     }
     
     setIsSaving(true);
     try {
-      console.log('Save triggered:', {
-        documentId,
-        currentDocumentId,
-        isNew: documentId === 'new' && !currentDocumentId,
-        title: documentTitle,
-        contentLength: documentContent.length
-      });
+      // Use provided content/title or current state
+      const contentToSave = overrideContent !== undefined ? overrideContent : documentContent;
+      const titleToSave = overrideTitle !== undefined ? overrideTitle : documentTitle;
 
       if (documentId === 'new' && !currentDocumentId) {
-        console.log('Creating new document with title:', documentTitle, 'content length:', documentContent.length);
         // Create new document
         const newDocumentId = await documentService.createDocument(
           user.uid,
-          documentTitle,
-          documentContent
+          titleToSave,
+          contentToSave
         );
-        console.log('New document created with ID:', newDocumentId);
         
         // Update the current document ID state
         setCurrentDocumentId(newDocumentId);
@@ -193,21 +296,21 @@ const DocumentEditor: React.FC = () => {
       } else {
         // Update existing document
         const docIdToUpdate = currentDocumentId || documentId;
-        console.log('Updating existing document:', docIdToUpdate, 'with title:', documentTitle, 'content length:', documentContent.length);
         
         if (docIdToUpdate && docIdToUpdate !== 'new') {
           await documentService.updateDocument(
             docIdToUpdate,
             user.uid,
             {
-              title: documentTitle,
-              content: documentContent
+              title: titleToSave,
+              content: contentToSave
             }
           );
-          console.log('Document updated successfully');
         }
       }
       setLastSaved(new Date());
+      // Clear unsaved changes flag after successful save
+      hasUnsavedChangesRef.current = false;
     } catch (error) {
       console.error('Failed to save document:', error);
     } finally {
@@ -215,20 +318,16 @@ const DocumentEditor: React.FC = () => {
     }
   };
 
-  const handleContentChange = (newContent: string) => {
+  const handleContentChange = (newContent: string, isFromSuggestion: boolean = false) => {
     setDocumentContent(newContent);
+    
+    // Track that we have unsaved changes
+    hasUnsavedChangesRef.current = true;
     
     // Validate and clean suggestions whenever content changes
     if (suggestions.length > 0) {
-      console.log('Content changed, validating existing suggestions...', {
-        newContentLength: newContent.length,
-        newContent: newContent,
-        existingSuggestions: suggestions.length
-      });
-      
       // If content is empty or very short, clear all suggestions immediately
       if (newContent.trim().length < 3) {
-        console.log('Content too short, clearing all suggestions');
         suggestions.forEach(suggestion => {
           rejectSuggestion(suggestion.id).catch(error => {
             console.error('Failed to clear suggestion:', error);
@@ -247,14 +346,17 @@ const DocumentEditor: React.FC = () => {
       clearTimeout(autoSaveTimeoutRef.current);
     }
     
-    // Auto-save after typing stops
-    autoSaveTimeoutRef.current = setTimeout(() => {
-      handleSave();
-    }, 2000);
+    // Much faster auto-save for suggestion acceptance
+    const saveDelay = isFromSuggestion ? 200 : 2000; // 200ms for suggestions, 2s for typing
+    
+    autoSaveTimeoutRef.current = setTimeout(async () => {
+      await handleSave(newContent, documentTitle);
+      // Clear unsaved changes flag after successful save
+      hasUnsavedChangesRef.current = false;
+    }, saveDelay);
   };
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    console.log('Title changed to:', e.target.value);
     setDocumentTitle(e.target.value);
   };
 
@@ -263,7 +365,6 @@ const DocumentEditor: React.FC = () => {
   };
 
   const handleSuggestionSelect = (suggestion: Suggestion) => {
-    console.log('Selecting suggestion:', suggestion);
     setSelectedSuggestion(suggestion);
     
     // Force a re-render to update highlights
@@ -274,65 +375,41 @@ const DocumentEditor: React.FC = () => {
   };
 
   const validateAndCleanSuggestions = async (currentContent: string) => {
-    console.log('Validating suggestions against current content...', {
-      currentContent,
-      suggestionCount: suggestions.length,
-      suggestions: suggestions.map(s => ({ id: s.id, originalText: s.originalText, startIndex: s.startIndex, endIndex: s.endIndex }))
-    });
-    
     const invalidSuggestions = [];
     
     for (const suggestion of suggestions) {
-      console.log(`Checking suggestion: "${suggestion.originalText}" at indices ${suggestion.startIndex}-${suggestion.endIndex}`);
-      
       const textAtIndices = currentContent.slice(suggestion.startIndex, suggestion.endIndex);
-      console.log(`Text at indices: "${textAtIndices}"`);
       
       if (textAtIndices !== suggestion.originalText) {
         // Check if the original text exists anywhere in the document
         const actualIndex = currentContent.indexOf(suggestion.originalText);
-        console.log(`Original text "${suggestion.originalText}" ${actualIndex === -1 ? 'NOT FOUND' : `found at index ${actualIndex}`}`);
         
         if (actualIndex === -1) {
           // Original text no longer exists, mark for removal
           invalidSuggestions.push(suggestion.id);
-          console.log(`✅ Marking suggestion "${suggestion.originalText}" for removal - text no longer exists`);
-        } else {
-          console.log(`⚠️ Suggestion "${suggestion.originalText}" found at different index: ${actualIndex} (was ${suggestion.startIndex})`);
         }
-      } else {
-        console.log(`✅ Suggestion "${suggestion.originalText}" is still valid`);
       }
     }
-    
-    console.log(`Found ${invalidSuggestions.length} invalid suggestions to remove:`, invalidSuggestions);
     
     // Remove invalid suggestions
     for (const suggestionId of invalidSuggestions) {
       try {
-        console.log(`Removing invalid suggestion ID: ${suggestionId}`);
         await rejectSuggestion(suggestionId);
       } catch (error) {
         console.error('Failed to remove invalid suggestion:', error);
       }
     }
-    
-    if (invalidSuggestions.length > 0) {
-      console.log(`✅ Successfully removed ${invalidSuggestions.length} invalid suggestions`);
-    } else {
-      console.log('ℹ️ No invalid suggestions found');
-    }
   };
 
   const handleSuggestionAccept = async (suggestion: Suggestion) => {
     try {
-      console.log('DocumentEditor: Applying suggestion:', {
+      console.log('🔧 DocumentEditor: Starting suggestion acceptance', {
+        suggestionId: suggestion.id,
         originalText: suggestion.originalText,
         suggestedText: suggestion.suggestedText,
         startIndex: suggestion.startIndex,
         endIndex: suggestion.endIndex,
-        currentContent: documentContent,
-        textAtIndices: documentContent.slice(suggestion.startIndex, suggestion.endIndex)
+        currentContentLength: documentContent.length
       });
 
       // Verify the suggestion is still valid against current content
@@ -341,17 +418,14 @@ const DocumentEditor: React.FC = () => {
       let validEndIndex = suggestion.endIndex;
       
       if (actualTextAtIndices !== suggestion.originalText) {
-        console.warn('DocumentEditor: Suggestion indices are stale, text has changed');
+        console.warn('DocumentEditor: Suggestion indices are stale, searching for correct position');
         console.log('Expected:', suggestion.originalText);
-        console.log('Found at indices:', actualTextAtIndices);
+        console.log('Found at original indices:', actualTextAtIndices);
         
         // Try to find the correct position of the original text
         const actualIndex = documentContent.indexOf(suggestion.originalText);
         if (actualIndex === -1) {
-          console.error('DocumentEditor: Original text not found in current content, cannot apply suggestion');
-          console.log('Current content:', documentContent);
-          console.log('Looking for:', suggestion.originalText);
-          
+          console.error('DocumentEditor: Original text not found, rejecting stale suggestion');
           // Remove this stale suggestion from the store
           await rejectSuggestion(suggestion.id);
           return;
@@ -365,62 +439,75 @@ const DocumentEditor: React.FC = () => {
           oldStart: suggestion.startIndex,
           oldEnd: suggestion.endIndex,
           newStart: validStartIndex,
-          newEnd: validEndIndex,
-          foundText: documentContent.slice(validStartIndex, validEndIndex)
+          newEnd: validEndIndex
         });
       }
 
-      // Apply the suggestion to the document content using valid indices
-      const newContent = 
-        documentContent.slice(0, validStartIndex) +
-        suggestion.suggestedText +
-        documentContent.slice(validEndIndex);
+      // Final validation - ensure the text at valid indices matches expectation
+      const finalTextAtIndices = documentContent.slice(validStartIndex, validEndIndex);
+      if (finalTextAtIndices !== suggestion.originalText) {
+        console.error('DocumentEditor: Final validation failed', {
+          expected: suggestion.originalText,
+          found: finalTextAtIndices,
+          validStartIndex,
+          validEndIndex
+        });
+        await rejectSuggestion(suggestion.id);
+        return;
+      }
+
+      // Apply the suggestion using clean text replacement
+      const beforeText = documentContent.slice(0, validStartIndex);
+      const afterText = documentContent.slice(validEndIndex);
+      const newContent = beforeText + suggestion.suggestedText + afterText;
+
+      // Validate the replacement
+      const expectedLengthChange = suggestion.suggestedText.length - suggestion.originalText.length;
+      const actualLengthChange = newContent.length - documentContent.length;
       
-      console.log('DocumentEditor: Applying text replacement:', {
-        before: documentContent.slice(Math.max(0, validStartIndex - 20), validStartIndex + 20),
-        replacing: documentContent.slice(validStartIndex, validEndIndex),
-        with: suggestion.suggestedText,
-        after: newContent.slice(Math.max(0, validStartIndex - 20), validStartIndex + suggestion.suggestedText.length + 20)
+      if (actualLengthChange !== expectedLengthChange) {
+        console.error('DocumentEditor: Length change mismatch - aborting to prevent duplication', {
+          expectedChange: expectedLengthChange,
+          actualChange: actualLengthChange,
+          suggestion
+        });
+        return;
+      }
+
+      console.log('✅ DocumentEditor: Applying clean text replacement:', {
+        original: suggestion.originalText,
+        suggested: suggestion.suggestedText,
+        beforeText: beforeText.slice(-20),
+        afterText: afterText.slice(0, 20),
+        lengthChange: actualLengthChange
       });
       
-      // Update the document content
-      setDocumentContent(newContent);
+      // Use handleContentChange with fast auto-save for suggestions
+      // This ensures the auto-save mechanism works correctly with shorter delay
+      handleContentChange(newContent, true); // true = isFromSuggestion
       setSelectedSuggestion(null);
       
-      // Clear all remaining suggestions since indices are now invalid
-      // The re-analysis will generate fresh suggestions with correct indices
-      console.log('DocumentEditor: Clearing all suggestions due to text change');
-      suggestions.forEach(s => {
-        if (s.id !== suggestion.id) {
-          rejectSuggestion(s.id).catch(error => {
-            console.error('Failed to clear stale suggestion:', error);
-          });
-        }
+      // Accept the suggestion in the store
+      await acceptSuggestion(suggestion.id);
+      
+      // Clear stale suggestions but be more conservative
+      const staleSuggestions = suggestions.filter(s => {
+        if (s.id === suggestion.id) return false; // Skip the accepted one
+        
+        // Check if this suggestion's text still exists
+        const suggestionText = documentContent.slice(s.startIndex, s.endIndex);
+        return suggestionText !== s.originalText && documentContent.indexOf(s.originalText) === -1;
       });
       
-      // Trigger fresh analysis after a short delay to let the text update settle
-      setTimeout(async () => {
-        if (newContent.trim().length > 3 && user && (currentDocumentId || documentId)) {
-          console.log('Triggering fresh analysis after suggestion acceptance...');
-          try {
-            await requestAnalysis({
-              documentId: currentDocumentId || documentId || '',
-              userId: user.uid,
-              content: newContent,
-              analysisType: 'full'
-            });
-            console.log('Fresh analysis triggered successfully');
-          } catch (error) {
-            console.error('Failed to trigger fresh analysis:', error);
-          }
-        }
-      }, 1000); // Wait 1 second for content to settle
-      
-      // Auto-save the change
-      setTimeout(() => handleSave(), 500);
+      console.log(`DocumentEditor: Clearing ${staleSuggestions.length} stale suggestions`);
+      staleSuggestions.forEach(s => {
+        rejectSuggestion(s.id).catch(error => {
+          console.error('Failed to clear stale suggestion:', error);
+        });
+      });
       
     } catch (error) {
-      console.error('Failed to apply suggestion:', error);
+      console.error('DocumentEditor: Failed to apply suggestion:', error);
     }
   };
 
@@ -434,23 +521,11 @@ const DocumentEditor: React.FC = () => {
 
   const handleTagsChange = () => {
     // Force re-render when tags change
-    console.log('Tags changed, forcing re-render');
   };
 
   const handleSectionClick = (section: EssaySection) => {
+    // Simply store the selected section and let TextEditor handle accurate highlighting & scrolling
     setSelectedSection(section);
-    
-    // Calculate the position of the section in the document
-    const sectionStart = section.startIndex;
-    const sectionEnd = section.endIndex;
-    
-    // Focus on the text editor using a more general approach
-    const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
-    if (textarea) {
-      textarea.focus();
-      textarea.setSelectionRange(sectionStart, sectionEnd);
-      textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
   };
 
   const handleStructureAnalysisComplete = () => {
@@ -464,6 +539,62 @@ const DocumentEditor: React.FC = () => {
       }).catch(error => {
         console.error('Failed to refresh suggestions after structure analysis:', error);
       });
+    }
+  };
+
+  // 🔍 DEBUG: Force subscription setup manually
+  const debugForceSubscription = () => {
+    const docIdToUse = currentDocumentId || (documentId !== 'new' ? documentId : null);
+    console.log('🔍 [DEBUG] Manually forcing subscription setup...', {
+      docIdToUse,
+      'user?.uid': user?.uid,
+      currentDocumentId,
+      documentId
+    });
+    
+    if (user?.uid && docIdToUse) {
+      console.log('🔍 [DEBUG] Calling setActiveDocument manually...');
+      setActiveDocument(docIdToUse, user.uid);
+    } else {
+      console.log('🔍 [DEBUG] Cannot force subscription - missing requirements');
+    }
+  };
+
+  // 🔍 DEBUG: Manual function to check Firestore for suggestions
+  const debugCheckFirestoreSuggestions = async () => {
+    if (!user?.uid) return;
+    
+    const docIdToCheck = currentDocumentId || (documentId !== 'new' ? documentId : null);
+    if (!docIdToCheck) return;
+
+    console.log('🔍 [DEBUG] Manually checking Firestore for suggestions...', { 
+      docIdToCheck, 
+      userId: user.uid 
+    });
+
+    try {
+      // Import Firebase functions here to avoid importing at module level
+      const { collection, query, where, getDocs } = await import('firebase/firestore');
+      const { db } = await import('../lib/firebase');
+
+      const q = query(
+        collection(db, 'suggestions'),
+        where('documentId', '==', docIdToCheck),
+        where('userId', '==', user.uid)
+      );
+
+      const snapshot = await getDocs(q);
+      console.log('🔍 [DEBUG] Firestore query results:', {
+        totalDocs: snapshot.docs.length,
+        docs: snapshot.docs.map(doc => ({ 
+          id: doc.id, 
+          status: doc.data().status,
+          originalText: doc.data().originalText,
+          type: doc.data().type 
+        }))
+      });
+    } catch (error) {
+      console.error('🔍 [DEBUG] Error querying Firestore:', error);
     }
   };
 
@@ -481,6 +612,14 @@ const DocumentEditor: React.FC = () => {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-lg font-medium">Loading Editor...</div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-lg font-medium">Loading Document...</div>
       </div>
     );
   }
@@ -524,6 +663,22 @@ const DocumentEditor: React.FC = () => {
               {/* Right section - aligned with AI Suggestions panel */}
               <div className="w-80 flex items-center justify-end space-x-3 flex-shrink-0">
                 <button
+                  onClick={debugForceSubscription}
+                  className="inline-flex items-center px-2 py-1 border border-blue-300 text-xs font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100 focus:outline-none"
+                  title="Debug: Force subscription setup"
+                >
+                  🔗 Sub
+                </button>
+                
+                <button
+                  onClick={debugCheckFirestoreSuggestions}
+                  className="inline-flex items-center px-2 py-1 border border-red-300 text-xs font-medium rounded-md text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none"
+                  title="Debug: Check Firestore for suggestions"
+                >
+                  🔍 Debug
+                </button>
+                
+                <button
                   onClick={() => setShowRubricManager(true)}
                   className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
                 >
@@ -532,7 +687,7 @@ const DocumentEditor: React.FC = () => {
                 </button>
                 
                 <button
-                  onClick={handleSave}
+                  onClick={() => handleSave()}
                   disabled={isSaving}
                   className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50"
                 >
@@ -603,7 +758,7 @@ const DocumentEditor: React.FC = () => {
               <div className="bg-white rounded-lg shadow-sm border flex flex-col" style={{ height: 'calc(100vh - 120px)' }}>
                 {/* Paragraph Tagging Controls */}
                 <div className="flex-shrink-0">
-                  <ParagraphTaggingControls />
+                  <ParagraphTaggingControls documentId={currentDocumentId || documentId || ''} userId={user?.uid || ''} />
                 </div>
                 
                 {/* Text Editor with scrolling */}
@@ -614,6 +769,7 @@ const DocumentEditor: React.FC = () => {
                     initialContent={documentContent}
                     onContentChange={handleContentChange}
                     selectedSuggestion={selectedSuggestion}
+                    selectedSection={selectedSection}
                     highlightsVisible={highlightsVisible}
                     onTagsChange={handleTagsChange}
                   />

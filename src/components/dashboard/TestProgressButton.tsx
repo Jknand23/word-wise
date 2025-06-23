@@ -3,6 +3,7 @@ import { TestTube, Trash2, RefreshCw } from 'lucide-react';
 import { generateTestProgressData, clearTestProgressData } from '../../utils/testProgressData';
 import { useAuthStore } from '../../store/authStore';
 import { useProgressStore } from '../../stores/progressStore';
+import { cachePerformanceTesting } from '../../utils/cachePerformanceTesting';
 
 const TestProgressButton: React.FC = () => {
   const { user } = useAuthStore();
@@ -10,6 +11,8 @@ const TestProgressButton: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [results, setResults] = useState('');
 
   const handleGenerateTestData = async () => {
     if (!user?.uid) return;
@@ -53,6 +56,48 @@ const TestProgressButton: React.FC = () => {
     await loadProgress(user.uid);
   };
 
+  const runCachePerformanceTest = async () => {
+    if (!user?.uid) {
+      alert('Please log in to run cache performance tests.');
+      return;
+    }
+    
+    setIsLoading(true);
+    setResults('');
+    
+    try {
+      console.log('🧪 Starting Cache Performance Test...');
+      
+      const cacheTestResult = await cachePerformanceTesting.runBasicCacheTest(user.uid);
+      const { summary } = cacheTestResult;
+      
+      const cacheReport = `Cache Performance Test Results:
+✅ Tests Passed: ${summary.passedTests}/${summary.totalTests}
+📊 Cache Hit Rate: ${(summary.averageCacheHitRate * 100).toFixed(1)}%
+💰 Token Savings: ${summary.totalSavingsPercentage.toFixed(1)}%
+⏱️ Avg Response Time: ${summary.averageResponseTime}ms
+⌛ Test Duration: ${(summary.testDuration / 1000).toFixed(1)}s`;
+      
+      setResults(cacheReport);
+      
+      console.log('🎯 Cache Test Summary:', summary);
+      console.log('📊 Detailed Results:', cacheTestResult.results);
+      
+      // Store detailed results for later analysis
+      localStorage.setItem('lastCacheTestResults', JSON.stringify(cacheTestResult));
+      
+      alert('✅ Cache performance test completed! Check console for detailed results.');
+      
+    } catch (error) {
+      console.error('❌ Cache test failed:', error);
+      const errorMessage = `Cache test failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      setResults(errorMessage);
+      alert('❌ Cache test failed. Check console for details.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   if (process.env.NODE_ENV === 'production') {
     return null; // Hide in production
   }
@@ -88,6 +133,15 @@ const TestProgressButton: React.FC = () => {
           </button>
 
           <button
+            onClick={runCachePerformanceTest}
+            disabled={isLoading}
+            className="inline-flex items-center px-3 py-2 text-sm bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <TestTube className="h-4 w-4 mr-1" />
+            {isLoading ? 'Testing...' : 'Test Cache Performance'}
+          </button>
+
+          <button
             onClick={handleRefreshProgress}
             className="inline-flex items-center px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
           >
@@ -106,6 +160,12 @@ const TestProgressButton: React.FC = () => {
         </div>
       )}
 
+      {results && (
+        <div className="mt-3 text-xs text-gray-700 bg-gray-100 p-3 rounded font-mono whitespace-pre-line">
+          {results}
+        </div>
+      )}
+
       {showControls && (
         <div className="mt-3 text-xs text-yellow-700 bg-yellow-100 p-2 rounded">
           <strong>Test Data:</strong> Creates 4 sample documents showing writing improvement over time:
@@ -114,6 +174,12 @@ const TestProgressButton: React.FC = () => {
           <br />• Document 3: Low error rate (good quality)
           <br />• Document 4: Very low error rate (excellent quality)
           <br />This will demonstrate the quality trend analysis and personal best tracking.
+          <br /><br />
+          <strong>Cache Performance Test:</strong> Tests the content hash caching system:
+          <br />• Runs cache miss test (first analysis)
+          <br />• Runs cache hit test (repeat analysis)
+          <br />• Measures response times and token savings
+          <br />• Validates cache functionality and performance
         </div>
       )}
     </div>

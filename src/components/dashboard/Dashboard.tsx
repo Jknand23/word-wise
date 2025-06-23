@@ -7,6 +7,8 @@ import { useProgressStore } from '../../stores/progressStore';
 import { documentService, type Document } from '../../services/documentService';
 import ProgressCards from './ProgressCards';
 import TestProgressButton from './TestProgressButton';
+import { DifferentialAnalysisTestButton } from './DifferentialAnalysisTestButton';
+import { DirectDifferentialTest } from './DirectDifferentialTest';
 
 const Dashboard = () => {
   const { user } = useAuthStore();
@@ -222,8 +224,12 @@ const Dashboard = () => {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-        {/* Test Button (Development Only) */}
-        <TestProgressButton />
+        {/* Test Buttons (Development Only) */}
+        <div className="mb-8 space-y-4">
+          <TestProgressButton />
+          <DifferentialAnalysisTestButton />
+          <DirectDifferentialTest />
+        </div>
 
         {/* Progress Tracking */}
         {progressData && (

@@ -21,6 +21,7 @@ interface ParagraphTagStore extends TaggingState {
     }
   ) => Promise<void>;
   removeTag: (tagId: string) => Promise<void>;
+  clearAllTags: (documentId: string, userId: string) => Promise<void>;
   setFilter: (filter: 'all' | 'needs-review' | 'done' | null) => void;
   validateTags: (documentId: string, userId: string, content: string) => Promise<void>;
   clearTags: () => void;
@@ -143,6 +144,22 @@ export const useParagraphTagStore = create<ParagraphTagStore>((set, get) => ({
       set({ 
         error: error instanceof Error ? error.message : 'Failed to remove tag',
         isLoading: false 
+      });
+    }
+  },
+
+  clearAllTags: async (documentId: string, userId: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const { tags } = get();
+      const tagsToDelete = tags.filter(t => t.documentId === documentId && t.userId === userId);
+      await Promise.all(tagsToDelete.map(t => paragraphTagService.deleteTag(t.id)));
+      set({ tags: [], isLoading: false, filteredByTag: 'all' });
+    } catch (error) {
+      console.error('Failed to clear all tags:', error);
+      set({
+        error: error instanceof Error ? error.message : 'Failed to clear tags',
+        isLoading: false
       });
     }
   },

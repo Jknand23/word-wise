@@ -164,6 +164,78 @@ const StructureSidebar: React.FC<StructureSidebarProps> = ({
     return 'Needs Improvement';
   };
 
+  const generateStrengths = (section: EssaySection) => {
+    const strengths: string[] = [];
+    switch (section.type) {
+      case 'introduction': {
+        if (!section.isWeak) strengths.push('Provides clear context');
+        if (structure?.overallStructure.hasThesis) strengths.push('Introduces a thesis statement');
+        if (section.text.length > 120) strengths.push('Sufficient background information');
+        if (section.metadata?.transitionQuality === 'strong') strengths.push('Smooth transition into essay');
+        break;
+      }
+      case 'thesis': {
+        const wordCount = section.text.split(/\s+/).length;
+        if (wordCount <= 30) strengths.push('Concise and focused thesis');
+        if (/because|since|therefore/i.test(section.text)) strengths.push('Presents clear rationale');
+        if (/\b(should|must|needs to|ought to|will)\b/i.test(section.text)) strengths.push('Argumentative and assertive');
+        break;
+      }
+      case 'body-paragraph': {
+        if (section.metadata?.topicSentence) strengths.push('Clear topic sentence');
+        if (section.metadata?.evidenceCount && section.metadata.evidenceCount > 0) strengths.push('Includes supporting evidence');
+        if (section.text.length > 200) strengths.push('Well-developed analysis');
+        if (section.metadata?.transitionQuality === 'strong') strengths.push('Strong transition');
+        break;
+      }
+      case 'conclusion': {
+        if (/in conclusion|overall|to sum up/i.test(section.text)) strengths.push('Provides closure signals');
+        if (structure?.overallStructure.hasThesis) strengths.push('Restates thesis effectively');
+        if (section.text.length > 100) strengths.push('Offers thoughtful reflection');
+        break;
+      }
+      default: {
+        if (!section.isWeak) strengths.push('Well-structured content');
+      }
+    }
+    if (section.confidence > 0.8) strengths.push('High confidence identification');
+    return strengths;
+  };
+
+  const generateWeaknesses = (section: EssaySection) => {
+    const weaknesses: string[] = [];
+    switch (section.type) {
+      case 'introduction': {
+        if (section.text.length < 60) weaknesses.push('Background/context is limited');
+        if (!structure?.overallStructure.hasThesis) weaknesses.push('Missing clear thesis statement');
+        break;
+      }
+      case 'thesis': {
+        const wordCount = section.text.split(/\s+/).length;
+        if (wordCount > 40) weaknesses.push('Thesis may be too lengthy or unfocused');
+        if (!/should|must|needs to|ought to|will/i.test(section.text)) weaknesses.push('Thesis lacks a strong claim');
+        break;
+      }
+      case 'body-paragraph': {
+        if (section.metadata?.evidenceCount === 0) weaknesses.push('Needs supporting evidence');
+        if (!section.metadata?.topicSentence) weaknesses.push('Missing clear topic sentence');
+        if (section.text.length < 120) weaknesses.push('Paragraph could be further developed');
+        break;
+      }
+      case 'conclusion': {
+        if (!/in conclusion|overall|to sum up/i.test(section.text)) weaknesses.push('Missing concluding signals');
+        if (section.text.length < 80) weaknesses.push('Conclusion may be too brief');
+        break;
+      }
+      default: {
+        if (section.isWeak) weaknesses.push('Section needs strengthening');
+      }
+    }
+    if (section.metadata?.transitionQuality === 'weak') weaknesses.push('Weak transitions');
+    if (section.confidence < 0.6) weaknesses.push('Section boundaries unclear');
+    return weaknesses;
+  };
+
   return (
     <div className="h-full flex flex-col bg-white">
       {/* Header - Fixed */}
@@ -342,15 +414,7 @@ const StructureSidebar: React.FC<StructureSidebarProps> = ({
                           </div>
                           <div className="text-green-600 space-y-1">
                             {(() => {
-                              const strengths = [];
-                              if (!section.isWeak) strengths.push('Well-structured content');
-                              if (section.metadata?.transitionQuality === 'strong') strengths.push('Strong transitions');
-                              if (section.metadata?.transitionQuality === 'moderate' && goals.academicLevel !== 'undergrad') strengths.push('Good transitions');
-                              if (section.text.length > 200) strengths.push('Adequate length');
-                              if (section.metadata?.evidenceCount && section.metadata.evidenceCount > 0) strengths.push('Contains supporting evidence');
-                              if (section.type === 'body-paragraph' && section.metadata?.topicSentence) strengths.push('Clear topic sentence');
-                              if (section.confidence > 0.8) strengths.push('Clear section identification');
-                              
+                              const strengths = generateStrengths(section);
                               return strengths.length > 0 ? (
                                 strengths.map((strength, idx) => <div key={idx}>• {strength}</div>)
                               ) : (
@@ -368,14 +432,7 @@ const StructureSidebar: React.FC<StructureSidebarProps> = ({
                           </div>
                           <div className="text-red-600 space-y-1">
                             {(() => {
-                              const weaknesses = [];
-                              if (section.isWeak) weaknesses.push('Section needs strengthening');
-                              if (section.text.length < 100) weaknesses.push('Could use more development');
-                              if (section.metadata?.transitionQuality === 'weak') weaknesses.push('Weak transitions');
-                              if (section.metadata?.transitionQuality === 'moderate' && goals.academicLevel === 'undergrad') weaknesses.push('Transitions need upgrading for undergraduate level');
-                              if (section.metadata?.evidenceCount === 0 && section.type === 'body-paragraph') weaknesses.push('Lacks supporting evidence');
-                              if (section.confidence < 0.6) weaknesses.push('Section boundaries unclear');
-                              
+                              const weaknesses = generateWeaknesses(section);
                               return weaknesses.length > 0 ? (
                                 weaknesses.map((weakness, idx) => <div key={idx}>• {weakness}</div>)
                               ) : (

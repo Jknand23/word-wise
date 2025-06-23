@@ -22,7 +22,7 @@ interface WritingGoalsState {
 }
 
 const defaultGoals: WritingGoals = {
-  academicLevel: 'high-school',
+  academicLevel: 'undergrad',
   assignmentType: 'essay',
   customInstructions: '',
 };

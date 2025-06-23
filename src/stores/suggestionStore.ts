@@ -4,6 +4,7 @@ import type { Suggestion, SuggestionRequest, ParagraphTag } from '../types/sugge
 import { suggestionService } from '../services/suggestionService';
 import { modificationTrackingService } from '../services/modificationTrackingService';
 import { paragraphTagService } from '../services/paragraphTagService';
+import { logger } from '../utils/logger';
 
 interface SuggestionStore {
   // State
@@ -40,20 +41,25 @@ export const useSuggestionStore = create<SuggestionStore>()(
 
       // Set active document
       setActiveDocument: (documentId: string, userId: string) => {
+        console.log('📄 [SuggestionStore] Setting active document:', { documentId, userId });
         const { unsubscribe, activeDocumentId } = get();
         if (activeDocumentId === documentId && unsubscribe) {
+          console.log('📄 [SuggestionStore] Already subscribed to this document, skipping');
           return; // Already subscribed to this document
         }
 
         if (unsubscribe) {
+          console.log('📄 [SuggestionStore] Unsubscribing from previous document');
           unsubscribe(); // Unsubscribe from the previous document
         }
 
         if (!userId) {
+          console.log('📄 [SuggestionStore] No user ID provided');
           set({ error: "User not authenticated. Cannot load suggestions.", unsubscribe: null });
           return;
         }
 
+        console.log('📄 [SuggestionStore] Setting up subscription for document:', documentId);
         set({ activeDocumentId: documentId, isLoading: true, error: null });
         const newUnsubscribe = get().subscribeToDocument(documentId, userId);
         set({ unsubscribe: newUnsubscribe });
@@ -79,16 +85,27 @@ export const useSuggestionStore = create<SuggestionStore>()(
 
       // Request AI analysis
       requestAnalysis: async (request: SuggestionRequest) => {
+        console.log('🔬 [SuggestionStore] Starting AI analysis:', {
+          documentId: request.documentId,
+          contentLength: request.content.length,
+          analysisType: request.analysisType || 'full'
+        });
         set({ isAnalyzing: true, error: null });
+        
         try {
           // Clean up old modifications before analysis
           await modificationTrackingService.cleanupOldModifications(request.documentId, request.userId);
           
-          await suggestionService.requestSuggestions(request);
-          // Suggestions will be updated via real-time subscription
+          // Request suggestions, but don't use the response directly.
+          // The real-time listener will pick up the changes from Firestore.
+          const response = await suggestionService.requestSuggestions(request);
+          console.log('🔬 [SuggestionStore] Analysis request completed:', response);
+          
+          console.log('🔬 [SuggestionStore] AI analysis request sent. Waiting for real-time update.');
+
           set({ isAnalyzing: false });
         } catch (error) {
-          console.error('Failed to request analysis:', error);
+          console.error('🔬 [SuggestionStore] AI analysis failed:', error);
           set({ 
             error: error instanceof Error ? error.message : 'Failed to analyze document',
             isAnalyzing: false 
@@ -108,12 +125,11 @@ export const useSuggestionStore = create<SuggestionStore>()(
           
           if (acceptedSuggestion) {
             // Track the modification for clarity and engagement suggestions
-            console.log(`[SuggestionStore] About to track modification for ${acceptedSuggestion.type} suggestion:`, acceptedSuggestion.id);
+            logger.debug(`Tracking ${acceptedSuggestion.type} suggestion acceptance`);
             await modificationTrackingService.trackModification(
               acceptedSuggestion, 
               acceptedSuggestion.suggestedText
             );
-            console.log(`[SuggestionStore] Successfully tracked modification for ${acceptedSuggestion.type} suggestion:`, acceptedSuggestion.id);
           }
 
           // Simply remove the accepted suggestion - don't try to update indices here
@@ -165,7 +181,9 @@ export const useSuggestionStore = create<SuggestionStore>()(
 
       // Subscribe to real-time updates
       subscribeToDocument: (documentId: string, userId: string) => {
+        console.log('📡 [SuggestionStore] Setting up real-time subscription:', { documentId, userId });
         if (!userId) {
+          console.log('📡 [SuggestionStore] Cannot subscribe - no user ID');
           set({ error: "User not authenticated. Cannot subscribe to suggestions." });
           return () => {};
         }
@@ -174,6 +192,11 @@ export const useSuggestionStore = create<SuggestionStore>()(
           documentId,
           userId,
           (suggestions) => { // onNext
+            console.log('🔔 [SuggestionStore] Subscription callback received:', {
+              suggestionsCount: suggestions.length,
+              documentId,
+              suggestions: suggestions.slice(0, 2) // Show first 2 for debugging
+            });
             set({ suggestions, isLoading: false, error: null });
           },
           (error) => { // onError
@@ -209,30 +232,7 @@ export const useSuggestionStore = create<SuggestionStore>()(
       // Filter suggestions to exclude those from "Done" paragraphs
       getFilteredSuggestions: (content: string, paragraphTags: ParagraphTag[]) => {
         const { suggestions } = get();
-        
-        if (!content || paragraphTags.length === 0) {
-          return suggestions;
-        }
-
-        // Get paragraph boundaries
-        const paragraphs = paragraphTagService.extractParagraphs(content);
-        const doneParagraphs = paragraphTags
-          .filter(tag => tag.tagType === 'done')
-          .map(tag => tag.paragraphIndex);
-
-        // Filter out suggestions that fall within "Done" paragraphs
-        return suggestions.filter(suggestion => {
-          for (let i = 0; i < paragraphs.length; i++) {
-            if (doneParagraphs.includes(i)) {
-              const paragraph = paragraphs[i];
-              if (suggestion.startIndex >= paragraph.startIndex && 
-                  suggestion.endIndex <= paragraph.endIndex) {
-                return false; // This suggestion is in a "Done" paragraph
-              }
-            }
-          }
-          return true; // This suggestion is not in a "Done" paragraph
-        });
+        return suggestions;
       },
 
 

@@ -4,7 +4,7 @@ service cloud.firestore {
     // Suggestions can be read only by the user who owns them.
     // A user can create, update, or delete suggestions for their own documents.
     match /suggestions/{suggestionId} {
-      allow read, update, delete: if request.auth.uid == resource.data.userId;
+      allow list, read, update, delete: if request.auth.uid == resource.data.userId;
       allow create: if request.auth.uid == request.resource.data.userId;
     }
     
@@ -73,6 +73,40 @@ service cloud.firestore {
 
     // Allow authenticated users to manage their own document quality metrics
     match /documentQualityMetrics/{metricId} {
+      allow read, write, create, update: if request.auth != null && (
+        (resource.data != null && request.auth.uid == resource.data.userId) ||
+        (request.resource.data != null && request.auth.uid == request.resource.data.userId)
+      );
+      allow list: if request.auth != null;
+    }
+
+    // Allow authenticated users to manage their own analysis cache
+    match /analysisCache/{cacheId} {
+      // User can read or delete their own cache entries.
+      allow read, delete: if request.auth.uid == resource.data.metadata.userId;
+
+      // User can create cache entries for themselves.
+      allow create: if request.auth.uid == request.resource.data.metadata.userId;
+
+      // User can update their own entries and cannot change ownership.
+      allow update: if request.auth.uid == resource.data.metadata.userId &&
+                     request.auth.uid == request.resource.data.metadata.userId;
+      
+      // Allow users to query for their own cache entries.
+      allow list: if request.auth != null;
+    }
+
+    // Allow authenticated users to manage their own document changes tracking
+    match /documentChanges/{changeId} {
+      allow read, write, create, update: if request.auth != null && (
+        (resource.data != null && request.auth.uid == resource.data.userId) ||
+        (request.resource.data != null && request.auth.uid == request.resource.data.userId)
+      );
+      allow list: if request.auth != null;
+    }
+
+    // Allow authenticated users to manage their own differential analysis metrics
+    match /differentialAnalysisMetrics/{metricId} {
       allow read, write, create, update: if request.auth != null && (
         (resource.data != null && request.auth.uid == resource.data.userId) ||
         (request.resource.data != null && request.auth.uid == request.resource.data.userId)

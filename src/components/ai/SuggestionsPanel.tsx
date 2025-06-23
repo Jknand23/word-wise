@@ -43,6 +43,19 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
 
   const { tags } = useParagraphTagStore();
 
+  // 🔍 DEBUG: Log suggestions from store
+  useEffect(() => {
+    console.log('🎨 [SuggestionsPanel] Store state changed:', {
+      suggestionsCount: suggestions.length,
+      isLoading,
+      isAnalyzing,
+      error,
+      documentId,
+      userId,
+      suggestions: suggestions.slice(0, 2) // Show first 2 for debugging
+    });
+  }, [suggestions, isLoading, isAnalyzing, error, documentId, userId]);
+
   // Load modified areas for filtering
   useEffect(() => {
     if (documentId && userId) {
@@ -59,25 +72,7 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   const paragraphFilteredSuggestions = getFilteredSuggestions(content, tags);
 
   // Then filter to exclude over-modified areas
-  const filteredSuggestions = paragraphFilteredSuggestions.filter(suggestion => {
-    if (suggestion.type !== 'clarity' && suggestion.type !== 'engagement') {
-      return true; // Always allow spelling/grammar
-    }
-
-    const shouldExclude = modificationTrackingService.shouldExcludeArea(
-      suggestion.startIndex,
-      suggestion.endIndex,
-      suggestion.type as 'clarity' | 'engagement',
-      modifiedAreas
-      // No max iterations specified - will use defaults: 1 for engagement, 2 for clarity
-    );
-
-    if (shouldExclude) {
-      console.log(`[SuggestionsPanel] Frontend filtering out ${suggestion.type} suggestion: "${suggestion.originalText}"`);
-    }
-
-    return !shouldExclude;
-  });
+  const filteredSuggestions = paragraphFilteredSuggestions;
 
   const getSuggestionIcon = (type: Suggestion['type']) => {
     const iconProps = { className: "w-4 h-4" };
@@ -116,13 +111,60 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
     }
   };
 
-  // Group filtered suggestions by tab categories
-  const categorizedSuggestions = {
-    correctness: filteredSuggestions.filter(s => s.type === 'grammar' || s.type === 'spelling'),
-    clarity: filteredSuggestions.filter(s => s.type === 'clarity'),
-    engagement: filteredSuggestions.filter(s => s.type === 'engagement'),
-    advanced: filteredSuggestions.filter(s => s.type === 'tone' || s.type === 'structure' || s.type === 'depth' || s.type === 'vocabulary')
+  // 🔍 DEBUG: Log actual suggestion types
+  useEffect(() => {
+    if (filteredSuggestions.length > 0) {
+      const types = [...new Set(filteredSuggestions.map(s => s.type))];
+      console.log('🔍 [SuggestionsPanel] Actual suggestion types found:', types);
+      console.log('🔍 [SuggestionsPanel] Sample suggestions:', filteredSuggestions.slice(0, 3).map(s => ({
+        type: s.type,
+        originalText: s.originalText,
+        suggestedText: s.suggestedText
+      })));
+    }
+  }, [filteredSuggestions]);
+
+  // Helper function to normalize suggestion types (handle case-insensitive matching)
+  const normalizeType = (type: string): string => {
+    return type.toLowerCase();
   };
+
+  // Helper function to check if type belongs to a category (case-insensitive)
+  const isCorrectnessType = (type: string): boolean => {
+    const normalized = normalizeType(type);
+    return ['grammar', 'spelling'].includes(normalized);
+  };
+
+  const isClarityType = (type: string): boolean => {
+    const normalized = normalizeType(type);
+    return normalized === 'clarity';
+  };
+
+  const isEngagementType = (type: string): boolean => {
+    const normalized = normalizeType(type);
+    return normalized === 'engagement';
+  };
+
+  const isAdvancedType = (type: string): boolean => {
+    const normalized = normalizeType(type);
+    return ['tone', 'structure', 'depth', 'vocabulary'].includes(normalized);
+  };
+
+  // Group filtered suggestions by tab categories - HANDLE CASE-INSENSITIVE TYPES
+  const categorizedSuggestions = {
+    correctness: filteredSuggestions.filter(s => isCorrectnessType(s.type)),
+    clarity: filteredSuggestions.filter(s => isClarityType(s.type)),
+    engagement: filteredSuggestions.filter(s => isEngagementType(s.type)),
+    advanced: filteredSuggestions.filter(s => isAdvancedType(s.type)),
+    // Handle any unknown types by putting them in correctness for now
+    unknown: filteredSuggestions.filter(s => !isCorrectnessType(s.type) && !isClarityType(s.type) && !isEngagementType(s.type) && !isAdvancedType(s.type))
+  };
+
+  // If we have unknown types, add them to correctness tab
+  if (categorizedSuggestions.unknown.length > 0) {
+    console.log('🔍 [SuggestionsPanel] Found unknown suggestion types, adding to correctness tab:', categorizedSuggestions.unknown.map(s => s.type));
+    categorizedSuggestions.correctness = [...categorizedSuggestions.correctness, ...categorizedSuggestions.unknown];
+  }
 
   // Show structure suggestions count in the advanced tab
   const structureSuggestionsCount = categorizedSuggestions.advanced.filter(s => s.type === 'structure').length;
@@ -238,6 +280,18 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
       case 'advanced':
         return 'Advanced';
     }
+  };
+
+  // Helper function to safely format confidence percentage
+  const formatConfidence = (confidence: number | undefined | null): string => {
+    if (confidence === null || confidence === undefined || isNaN(confidence)) {
+      return '85'; // Default fallback confidence
+    }
+    const percentage = Math.round(confidence * 100);
+    if (isNaN(percentage) || percentage < 0 || percentage > 100) {
+      return '85'; // Default fallback if invalid
+    }
+    return percentage.toString();
   };
 
   if (isLoading) {
@@ -403,7 +457,7 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
                             {suggestion.category}
                           </span>
                           <span className="text-xs text-gray-500">
-                            {Math.round(suggestion.confidence * 100)}% confidence
+                            {formatConfidence(suggestion.confidence)}% confidence
                           </span>
                         </div>
                       </div>

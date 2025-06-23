@@ -90,7 +90,16 @@ const RubricFeedbackPanel: React.FC<RubricFeedbackPanelProps> = ({ documentId, c
     }
   };
 
-  const formatScore = (score: number) => Math.round(score * 100);
+  const formatScore = (score: number) => {
+    if (score === null || score === undefined || isNaN(score)) {
+      return 0; // Default fallback score
+    }
+    const percentage = Math.round(score * 100);
+    if (isNaN(percentage) || percentage < 0 || percentage > 100) {
+      return 0; // Default fallback if invalid
+    }
+    return percentage;
+  };
 
   const wordCount = content.trim().split(/\s+/).filter(word => word.length > 0).length;
   const getWordCountStatus = () => {
@@ -204,7 +213,7 @@ const RubricFeedbackPanel: React.FC<RubricFeedbackPanelProps> = ({ documentId, c
                           {formatScore(result.score)}%
                         </span>
                         <div className="text-xs text-gray-500">
-                          Weight: {Math.round(criterion.weight * 100)}%
+                          Weight: {formatScore(criterion.weight)}%
                         </div>
                       </div>
                     </div>

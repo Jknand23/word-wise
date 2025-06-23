@@ -5,13 +5,14 @@ import { useParagraphTagStore } from '../../stores/paragraphTagStore';
 import { paragraphTagService } from '../../services/paragraphTagService';
 import SuggestionTooltip from './SuggestionTooltip';
 import ParagraphTagger from './ParagraphTagger';
-import type { Suggestion } from '../../types/suggestion';
+import type { Suggestion, EssaySection } from '../../types/suggestion';
 
 interface TextEditorProps {
   documentId: string;
   initialContent?: string;
   onContentChange?: (content: string) => void;
   selectedSuggestion?: Suggestion | null;
+  selectedSection?: EssaySection | null;
   userId?: string;
   highlightsVisible?: boolean;
   onTagsChange?: () => void;
@@ -22,6 +23,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
   initialContent = '',
   onContentChange,
   selectedSuggestion,
+  selectedSection = null,
   userId = 'demo-user',
   highlightsVisible = true,
   onTagsChange
@@ -32,6 +34,14 @@ const TextEditor: React.FC<TextEditorProps> = ({
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const [tooltipVisible, setTooltipVisible] = useState(false);
   const [hasAISuggestions, setHasAISuggestions] = useState(false);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [paragraphBoundaries, setParagraphBoundaries] = useState<Array<{
+    index: number;
+    startPos: number;
+    endPos: number;
+    text: string;
+    actualTop: number;
+  }>>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { 
@@ -48,8 +58,11 @@ const TextEditor: React.FC<TextEditorProps> = ({
     loadTags,
     validateTags,
     getFilteredTags,
-    setFilter
+    setFilter,
+    clearAllTags
   } = useParagraphTagStore();
+
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Update content when initialContent changes
   useEffect(() => {
@@ -62,6 +75,23 @@ const TextEditor: React.FC<TextEditorProps> = ({
   useEffect(() => {
     setHasAISuggestions(suggestions.length > 0);
   }, [suggestions]);
+
+  // Update paragraph boundaries when content changes
+  useEffect(() => {
+    const updateBoundaries = () => {
+      if (content.trim()) {
+        // Use setTimeout to ensure DOM is updated and textarea is rendered
+        setTimeout(() => {
+          const boundaries = calculateParagraphBoundaries(content);
+          setParagraphBoundaries(boundaries);
+        }, 100); // Give more time for textarea to fully render
+      } else {
+        setParagraphBoundaries([]);
+      }
+    };
+    
+    updateBoundaries();
+  }, [content]);
 
   // Load tags when document or user changes
   useEffect(() => {
@@ -145,6 +175,55 @@ const TextEditor: React.FC<TextEditorProps> = ({
     }
   }, [selectedSuggestion, content]);
 
+  // Scroll to selected essay section
+  useEffect(() => {
+    if (selectedSection && textareaRef.current) {
+      const textarea = textareaRef.current;
+
+      // Attempt to find exact position of section text to handle index mismatches
+      const sectionText = selectedSection.text.trim();
+      let actualIndex = -1;
+
+      if (sectionText.length > 0) {
+        // Find all occurrences, pick closest to original startIndex
+        const occurrences: number[] = [];
+        let searchIdx = content.indexOf(sectionText);
+        while (searchIdx !== -1) {
+          occurrences.push(searchIdx);
+          searchIdx = content.indexOf(sectionText, searchIdx + 1);
+        }
+        if (occurrences.length === 1) {
+          actualIndex = occurrences[0];
+        } else if (occurrences.length > 1) {
+          // Choose occurrence closest to provided startIndex
+          actualIndex = occurrences.reduce((prev, curr) => (
+            Math.abs(curr - selectedSection.startIndex) < Math.abs(prev - selectedSection.startIndex) ? curr : prev
+          ), occurrences[0]);
+        }
+      }
+
+      if (actualIndex === -1) {
+        // Fallback to provided startIndex
+        actualIndex = selectedSection.startIndex;
+      }
+
+      const endIndex = actualIndex + sectionText.length;
+
+      // Apply selection
+      textarea.focus();
+      textarea.setSelectionRange(actualIndex, endIndex);
+
+      // Scroll container to reveal section near top
+      const topPos = getCharacterPosition(actualIndex);
+      if (containerRef.current) {
+        containerRef.current.scrollTo({
+          top: Math.max(0, topPos - 40),
+          behavior: 'smooth'
+        });
+      }
+    }
+  }, [selectedSection]);
+
   const handleContentChange = (newContent: string) => {
     setContent(newContent);
     setIsTyping(true);
@@ -186,29 +265,104 @@ const TextEditor: React.FC<TextEditorProps> = ({
     }
   };
 
-  const handleAnalyzeClick = async () => {
+  /**
+   * Trigger content analysis from the UI button.
+   *
+   * Manual click now ALWAYS runs a **FULL** document analysis for the most
+   * comprehensive feedback. Incremental / differential analysis is confined to
+   * automatic background runs that occur after typing pauses or suggestion
+   * acceptance.
+   */
+  const handleAnalyzeClick = async (event?: React.MouseEvent<HTMLButtonElement>) => {
     if (!content.trim()) return;
-    
+
     if (isAnalyzing) {
       console.log('Analysis already in progress, skipping manual analysis');
       return;
     }
-    
-    // Clear any pending auto-analysis
+
+    // Manual analysis should now **always** run a FULL document analysis.
+    // Incremental (quick) analysis is reserved for automatic background runs.
+
+    // Clear any pending auto-analysis timers so we don't queue a duplicate incremental run.
     if (debounceTimeoutRef.current) {
       clearTimeout(debounceTimeoutRef.current);
       console.log('Cleared pending auto-analysis');
     }
-    
+
     try {
-      console.log('Starting manual analysis...', { content, documentId, userId });
+      console.log('Starting FULL analysis...', { contentLength: content.length, documentId, userId });
       await requestAnalysis({
         content,
         documentId,
         userId,
-        analysisType: 'full'
+        analysisType: 'full',
+        bypassCache: true,
       });
       console.log('Manual analysis completed successfully');
+      
+      // 🔍 DEBUG: Wait a moment and check what's in Firestore
+      setTimeout(async () => {
+        console.log('🔍 [DEBUG] Auto-checking Firestore 3 seconds after analysis...');
+        try {
+          const { collection, query, where, getDocs, orderBy } = await import('firebase/firestore');
+          const { db } = await import('../../lib/firebase');
+
+          // Test both queries to compare results
+          const qAll = query(
+            collection(db, 'suggestions'),
+            where('documentId', '==', documentId),
+            where('userId', '==', userId)
+          );
+          
+          const qPending = query(
+            collection(db, 'suggestions'),
+            where('documentId', '==', documentId),
+            where('userId', '==', userId),
+            where('status', '==', 'pending'),
+            orderBy('startIndex', 'asc')
+          );
+
+          // Test all suggestions query
+          const snapshotAll = await getDocs(qAll);
+          console.log('🔍 [DEBUG] All suggestions query results:', {
+            totalDocs: snapshotAll.docs.length,
+            docs: snapshotAll.docs.slice(0, 3).map(doc => {
+              const data = doc.data() as any;
+              return {
+                id: doc.id, 
+                status: data.status,
+                originalText: data.originalText,
+                type: data.type,
+                createdAt: data.createdAt
+              };
+            })
+          });
+
+          // Test pending suggestions query (same as subscription)
+          try {
+            const snapshotPending = await getDocs(qPending);
+            console.log('🔍 [DEBUG] Pending suggestions query results (same as subscription):', {
+              totalDocs: snapshotPending.docs.length,
+              docs: snapshotPending.docs.slice(0, 3).map(doc => {
+                const data = doc.data() as any;
+                return {
+                  id: doc.id, 
+                  status: data.status,
+                  originalText: data.originalText,
+                  type: data.type,
+                  createdAt: data.createdAt
+                };
+              })
+            });
+          } catch (error) {
+            console.error('🔍 [DEBUG] Pending query FAILED (same error as subscription?):', error);
+          }
+        } catch (error) {
+          console.error('🔍 [DEBUG] Auto-check Firestore error:', error);
+        }
+      }, 3000);
+      
     } catch (error) {
       console.error('Failed to analyze content:', error);
       // Show more detailed error to user
@@ -698,7 +852,8 @@ const TextEditor: React.FC<TextEditorProps> = ({
               <ParagraphTagger
                 documentId={documentId}
                 userId={userId}
-                content={content}
+                content={paragraph.text}
+                fullDocumentContent={content}
                 paragraphIndex={index}
                 onTagUpdate={onTagsChange}
               />
@@ -716,25 +871,152 @@ const TextEditor: React.FC<TextEditorProps> = ({
 
   const getFilterButtonClass = (filterType: 'all' | 'needs-review' | 'done') => {
     const isActive = filteredByTag === filterType;
-    const baseClass = 'px-2 py-1 text-xs font-medium rounded border transition-colors duration-200';
+    const baseClass = 'px-3 h-7 text-xs font-semibold rounded-full transition-colors duration-200 whitespace-nowrap flex items-center';
     
     if (isActive) {
       switch (filterType) {
         case 'needs-review':
-          return `${baseClass} bg-yellow-100 border-yellow-300 text-yellow-800 hover:bg-yellow-200`;
+          return `${baseClass} bg-yellow-500 text-white shadow-sm`;
         case 'done':
-          return `${baseClass} bg-green-100 border-green-300 text-green-800 hover:bg-green-200`;
+          return `${baseClass} bg-green-600 text-white shadow-sm`;
         default:
-          return `${baseClass} bg-blue-100 border-blue-300 text-blue-800 hover:bg-blue-200`;
+          return `${baseClass} bg-blue-600 text-white shadow-sm`;
       }
     }
     
-    return `${baseClass} bg-white border-gray-300 text-gray-700 hover:bg-gray-50`;
+    return `${baseClass} bg-gray-100 text-gray-600 hover:bg-gray-200 border border-transparent`;
   };
 
   const filteredTags = getFilteredTags();
   const needsReviewCount = tags.filter(tag => tag.tagType === 'needs-review').length;
   const doneCount = tags.filter(tag => tag.tagType === 'done').length;
+
+  // Calculate paragraph boundaries for tag positioning
+  const calculateParagraphBoundaries = (text: string) => {
+    if (!text.trim()) return [];
+    
+    const boundaries: Array<{
+      index: number;
+      startPos: number;
+      endPos: number;
+      text: string;
+      actualTop: number;
+    }> = [];
+    
+    // Split by double newlines to get paragraphs
+    const paragraphSections = text.split('\n\n');
+    let currentPosition = 0;
+    let paragraphIndex = 0;
+    
+    paragraphSections.forEach((section, sectionIndex) => {
+      const trimmedSection = section.trim();
+      if (trimmedSection) {
+        // Find the actual start position in the original text
+        const startPos = currentPosition;
+        const endPos = currentPosition + section.length;
+        
+        // Get actual position using textarea's coordinate system
+        const actualTop = getCharacterPosition(startPos);
+        
+        boundaries.push({
+          index: paragraphIndex,
+          startPos,
+          endPos,
+          text: trimmedSection,
+          actualTop
+        });
+        
+        paragraphIndex++;
+      }
+      
+      // Move position forward by section length + separator length
+      currentPosition += section.length;
+      if (sectionIndex < paragraphSections.length - 1) {
+        currentPosition += 2; // Add 2 for '\n\n'
+      }
+    });
+    
+    return boundaries;
+  };
+
+  // Get actual pixel position of a character in the textarea
+  const getCharacterPosition = (charIndex: number): number => {
+    if (!textareaRef.current) {
+      // Fallback to simple calculation if textarea not available
+      const textUpToChar = content.substring(0, charIndex);
+      const linesBefore = (textUpToChar.match(/\n/g) || []).length;
+      const computedLineHeight = parseFloat(window.getComputedStyle(textareaRef.current!).lineHeight || '24');
+      const computedPadding = parseFloat(window.getComputedStyle(textareaRef.current!).paddingTop || '16');
+      return linesBefore * computedLineHeight + computedPadding;
+    }
+    
+    const textarea = textareaRef.current;
+    
+    try {
+      // Create a temporary div to measure text position
+      const measureDiv = document.createElement('div');
+      const cs = window.getComputedStyle(textarea);
+
+      // Mirror the textarea styles as closely as possible
+      measureDiv.style.position = 'absolute';
+      measureDiv.style.visibility = 'hidden';
+      measureDiv.style.whiteSpace = 'pre-wrap';
+      measureDiv.style.wordWrap = 'break-word';
+      measureDiv.style.font = cs.font;
+      measureDiv.style.lineHeight = cs.lineHeight;
+      measureDiv.style.letterSpacing = cs.letterSpacing;
+      measureDiv.style.boxSizing = 'border-box';
+
+      // Match the exact inner width of the textarea (including padding)
+      measureDiv.style.width = `${textarea.clientWidth}px`;
+      measureDiv.style.padding = cs.padding;
+      measureDiv.style.border = 'none';
+      measureDiv.style.maxWidth = `${textarea.clientWidth}px`;
+      measureDiv.style.fontFamily = cs.fontFamily;
+      
+      // Add text up to the character position
+      const textUpToChar = content.substring(0, charIndex);
+      measureDiv.textContent = textUpToChar;
+      
+      document.body.appendChild(measureDiv);
+      const height = measureDiv.offsetHeight;
+      document.body.removeChild(measureDiv);
+      
+      const paddingTop = parseFloat(cs.paddingTop || '0');
+      return Math.max(0, height - paddingTop); // Subtract top padding, ensure non-negative
+    } catch (error) {
+      console.error('Error calculating character position:', error);
+      // Fallback to simple calculation
+      const textUpToChar = content.substring(0, charIndex);
+      const linesBefore = (textUpToChar.match(/\n/g) || []).length;
+      const computedLineHeight = parseFloat(window.getComputedStyle(textareaRef.current!).lineHeight || '24');
+      const computedPadding = parseFloat(window.getComputedStyle(textareaRef.current!).paddingTop || '16');
+      return linesBefore * computedLineHeight + computedPadding;
+    }
+  };
+
+  // Handle container scroll to update tag positions
+  const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLDivElement;
+    setScrollTop(target.scrollTop);
+  };
+
+  // Auto-scroll to first matching paragraph when filter changes
+  useEffect(() => {
+    if (filteredByTag && filteredByTag !== 'all' && paragraphBoundaries.length > 0) {
+      const matchingTagType = filteredByTag;
+      const matchingTag = tags.find(t => t.tagType === matchingTagType);
+      if (matchingTag) {
+        const matchingBoundary = paragraphBoundaries.find(b => b.index === matchingTag.paragraphIndex);
+        if (matchingBoundary && containerRef.current) {
+          containerRef.current.scrollTo({
+            top: Math.max(0, matchingBoundary.actualTop - 40),
+            behavior: 'smooth'
+          });
+        }
+      }
+    }
+  }, [filteredByTag]);
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -748,35 +1030,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
             </p>
           )}
         </div>
-        <div className="flex items-center gap-4 min-w-0">
-          {/* Filter Controls */}
-          <div className="flex items-center gap-2 min-w-0">
-            <Filter className="w-4 h-4 text-gray-500 flex-shrink-0" />
-            <span className="text-sm text-gray-600 flex-shrink-0">Filter:</span>
-            <div className="flex gap-1 flex-wrap">
-              <button
-                onClick={() => handleFilterChange('all')}
-                className={getFilterButtonClass('all')}
-              >
-                All ({tags.length})
-              </button>
-              <button
-                onClick={() => handleFilterChange('needs-review')}
-                className={getFilterButtonClass('needs-review')}
-              >
-                <AlertCircle className="w-3 h-3 mr-1 flex-shrink-0" />
-                Review ({needsReviewCount})
-              </button>
-              <button
-                onClick={() => handleFilterChange('done')}
-                className={getFilterButtonClass('done')}
-              >
-                <CheckCircle className="w-3 h-3 mr-1 flex-shrink-0" />
-                Done ({doneCount})
-              </button>
-            </div>
-          </div>
-          
+        <div className="flex items-center gap-4 ml-auto">
           {/* Analyze Button */}
           <div className="flex items-center gap-2 flex-shrink-0">
             {isTyping && (
@@ -789,6 +1043,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
               onClick={handleAnalyzeClick}
               disabled={isAnalyzing || !content.trim()}
               className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+              title="Analyze the entire document for writing suggestions"
             >
               {isAnalyzing ? (
                 <Loader className="w-4 h-4 animate-spin" />
@@ -801,34 +1056,108 @@ const TextEditor: React.FC<TextEditorProps> = ({
         </div>
       </div>
 
-      {/* Editor Content - Fixed height regardless of content */}
+      {/* Editor Content - Unified Text Area with Overlay Tags */}
       <div className="flex-1 min-h-0">
-        <div className="h-full overflow-y-auto">
-          <div className="p-4">
-            {content.trim() && hasAISuggestions ? (
-              <div className="max-w-4xl mx-auto min-h-[600px]">
-                {renderParagraphsWithTags()}
-              </div>
-            ) : (
-              <div className="max-w-4xl mx-auto min-h-[600px]">
-                <textarea
-                  ref={textareaRef}
-                  value={content}
-                  onChange={(e) => handleContentChange(e.target.value)}
-                  onClick={handleTextareaClick}
-                  placeholder="Start writing your document here..."
-                  className="w-full h-full p-4 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-800 leading-relaxed"
-                  style={{ minHeight: '500px' }}
-                />
-                {content.trim() && !hasAISuggestions && (
-                  <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                    <p className="text-sm text-blue-800">
-                      📝 Keep writing or click "Analyze Text" to get AI suggestions and see paragraphs with tagging features.
-                    </p>
+        <div 
+          ref={containerRef}
+          className="h-full overflow-y-auto"
+          onScroll={handleScroll}
+        >
+          <div className="max-w-4xl mx-auto p-4 relative">
+            {/* Main Unified Textarea */}
+            <div className="relative">
+              <textarea
+                ref={textareaRef}
+                value={content}
+                onChange={(e) => handleContentChange(e.target.value)}
+                onClick={handleTextareaClick}
+                placeholder="Start writing your document here..."
+                className="w-full p-4 pr-20 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-800 leading-relaxed overflow-hidden font-sans"
+                style={{ 
+                  minHeight: '500px',
+                  height: 'auto',
+                  lineHeight: '1.5'
+                }}
+                rows={Math.max(20, content.split('\n').length + 5)}
+              />
+              
+              {/* Overlay Tags - Positioned between content and scroll bar */}
+              {content.trim() && paragraphBoundaries.length > 0 && (
+                <>
+                  {/* Highlight overlay for paragraph filtering */}
+                  {filteredByTag && filteredByTag !== 'all' && (
+                    <div className="absolute inset-0 pointer-events-none">
+                      {paragraphBoundaries.map((boundary, i) => {
+                        const next = paragraphBoundaries[i + 1];
+                        const startY = boundary.actualTop;
+                        const endY = next ? next.actualTop : textareaRef.current?.scrollHeight || 0;
+                        const height = Math.max(0, endY - startY);
+                        const tagForParagraph = tags.find(t => t.paragraphIndex === boundary.index);
+                        const shouldDim = !tagForParagraph || tagForParagraph.tagType !== filteredByTag;
+                        if (!shouldDim) return null; // Only dim non-matching paragraphs
+                        return (
+                          <div
+                            key={`dim-${boundary.index}`}
+                            className="absolute left-0 right-0 bg-gray-100 opacity-60"
+                            style={{
+                              top: `${startY}px`,
+                              height: `${height}px`
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="absolute top-0 right-0 w-16 pointer-events-none"
+                       style={{ height: `${Math.max(500, (content.split('\n').length + 5) * 24)}px` }}>
+                    {paragraphBoundaries.map((boundary) => {
+                      const tag = tags.find(t => t.paragraphIndex === boundary.index);
+                      const isFiltered = filteredByTag && filteredByTag !== 'all';
+                      const filteredTags = getFilteredTags();
+                      const shouldShow = !isFiltered || (tag && filteredTags.includes(tag));
+                      
+                      if (!shouldShow && isFiltered) return null;
+                      
+                      return (
+                        <div
+                          key={boundary.index}
+                          className="absolute right-4 pointer-events-auto transition-all duration-200"
+                          style={{
+                            top: `${boundary.actualTop}px`
+                          }}
+                        >
+                          <ParagraphTagger
+                            documentId={documentId}
+                            userId={userId}
+                            content={boundary.text}
+                            fullDocumentContent={content}
+                            paragraphIndex={boundary.index}
+                            onTagUpdate={onTagsChange}
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
-                )}
-              </div>
-            )}
+                </>
+              )}
+              
+              {/* Help text for empty state */}
+              {!content.trim() && (
+                <div className="absolute top-20 left-1/2 transform -translate-x-1/2 text-center text-gray-500 pointer-events-none">
+                  <p>📝 Start writing to see paragraph tags appear on the right</p>
+                </div>
+              )}
+              
+              {/* Analysis hint */}
+              {content.trim() && !hasAISuggestions && (
+                <div className="absolute bottom-4 left-4 right-20 p-3 bg-blue-50 border border-blue-200 rounded-lg pointer-events-none">
+                  <p className="text-sm text-blue-800">
+                    💡 Click "Analyze Text" to get AI suggestions and enable all paragraph tagging features.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

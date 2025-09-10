@@ -3,10 +3,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../lib/firebase';
 import type { 
   AssignmentRubric, 
-  RubricAnalysisRequest, 
-  RubricAnalysisResponse, 
-  RubricFeedback,
-  RubricCriterion 
+  RubricFeedback
 } from '../types/suggestion';
 
 export const rubricService = {
@@ -124,7 +121,7 @@ export const rubricService = {
     userId: string,
     rubric: AssignmentRubric,
     academicLevel: string
-  ): Promise<any> {
+  ): Promise<{ feedback: RubricFeedback; suggestions: unknown[]; analysisId: string; processingTime: number }> {
     try {
       console.log('RubricService: Requesting analysis with academic level:', academicLevel);
       const functions = getFunctions();
@@ -141,7 +138,7 @@ export const rubricService = {
         throw new Error("No data returned from rubric analysis function");
       }
 
-      return result.data;
+      return result.data as { feedback: RubricFeedback; suggestions: unknown[]; analysisId: string; processingTime: number };
     } catch (error) {
       console.error('Error requesting rubric analysis:', error);
       throw error;

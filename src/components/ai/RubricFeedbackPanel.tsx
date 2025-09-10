@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { CheckCircle, AlertCircle, XCircle, TrendingUp, Target, Lightbulb, Loader, Info } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { rubricService } from '../../services/rubricService';
@@ -21,7 +21,7 @@ const RubricFeedbackPanel: React.FC<RubricFeedbackPanelProps> = ({ documentId, c
   const [error, setError] = useState<string | null>(null);
   const [lastAnalyzedLength, setLastAnalyzedLength] = useState(0);
 
-  const handleAnalyze = async () => {
+  const handleAnalyze = useCallback(async () => {
     if (!user || !selectedRubric || !content.trim()) {
       setError('Cannot analyze. User, rubric, or content is missing.');
       return;
@@ -49,14 +49,14 @@ const RubricFeedbackPanel: React.FC<RubricFeedbackPanelProps> = ({ documentId, c
     } finally {
       setIsAnalyzing(false);
     }
-  };
+  }, [user, selectedRubric, content, documentId, academicLevel]);
 
   useEffect(() => {
     // Auto-analyze when content changes significantly
     if (content.length > 50 && Math.abs(content.length - lastAnalyzedLength) > 100) {
       handleAnalyze();
     }
-  }, [content]);
+  }, [content, handleAnalyze, lastAnalyzedLength]);
 
   if (!selectedRubric) {
     return (

@@ -14,7 +14,6 @@ interface ParagraphTaggerProps {
 const ParagraphTagger: React.FC<ParagraphTaggerProps> = ({
   documentId,
   userId,
-  content,
   fullDocumentContent,
   paragraphIndex,
   onTagUpdate

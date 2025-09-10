@@ -1,0 +1,75 @@
+# WordWise AI - Cloud Scheduler Configuration
+# This configuration defines scheduled jobs to keep Firebase functions warm
+# Prevents cold start delays by pinging functions every 5 minutes
+
+# Main health check endpoint
+- name: warm-health-check
+  description: "Keep main health check function warm"
+  schedule: "*/5 * * * *"  # Every 5 minutes
+  timeZone: "UTC"
+  httpTarget:
+    uri: "https://us-central1-wordwise-ai-3a4e1.cloudfunctions.net/pingHealth"
+    httpMethod: "POST"
+    headers:
+      Content-Type: "application/json"
+    body: "{}"
+
+# Warm the suggestions analysis function
+- name: warm-analyze-suggestions
+  description: "Keep analyzeSuggestions function warm"
+  schedule: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"  # Every 5 minutes, offset by 1 minute
+  timeZone: "UTC"
+  httpTarget:
+    uri: "https://us-central1-wordwise-ai-3a4e1.cloudfunctions.net/pingAnalyzeSuggestions"
+    httpMethod: "POST"
+    headers:
+      Content-Type: "application/json"
+    body: "{}"
+
+# Warm the essay structure analysis function
+- name: warm-analyze-essay-structure
+  description: "Keep analyzeEssayStructure function warm"
+  schedule: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"  # Every 5 minutes, offset by 2 minutes
+  timeZone: "UTC"
+  httpTarget:
+    uri: "https://us-central1-wordwise-ai-3a4e1.cloudfunctions.net/pingAnalyzeEssayStructure"
+    httpMethod: "POST"
+    headers:
+      Content-Type: "application/json"
+    body: "{}"
+
+# Warm the rubric parsing function
+- name: warm-parse-assignment-rubric
+  description: "Keep parseAssignmentRubric function warm"
+  schedule: "3,8,13,18,23,28,33,38,43,48,53,58 * * * *"  # Every 5 minutes, offset by 3 minutes
+  timeZone: "UTC"
+  httpTarget:
+    uri: "https://us-central1-wordwise-ai-3a4e1.cloudfunctions.net/pingParseAssignmentRubric"
+    httpMethod: "POST"
+    headers:
+      Content-Type: "application/json"
+    body: "{}"
+
+# Warm the rubric analysis function
+- name: warm-analyze-with-rubric
+  description: "Keep analyzeWithRubric function warm"
+  schedule: "4,9,14,19,24,29,34,39,44,49,54,59 * * * *"  # Every 5 minutes, offset by 4 minutes
+  timeZone: "UTC"
+  httpTarget:
+    uri: "https://us-central1-wordwise-ai-3a4e1.cloudfunctions.net/pingAnalyzeWithRubric"
+    httpMethod: "POST"
+    headers:
+      Content-Type: "application/json"
+    body: "{}"
+
+# Comprehensive warmup job - runs less frequently
+- name: warm-all-functions
+  description: "Comprehensive warmup of all functions"
+  schedule: "0 */2 * * *"  # Every 2 hours
+  timeZone: "UTC"
+  httpTarget:
+    uri: "https://us-central1-wordwise-ai-3a4e1.cloudfunctions.net/pingAllFunctions"
+    httpMethod: "POST"
+    headers:
+      Content-Type: "application/json"
+    body: "{}" 

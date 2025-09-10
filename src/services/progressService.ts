@@ -5,8 +5,6 @@ import {
   getDocs, 
   query, 
   where, 
-  orderBy, 
-  limit,
   updateDoc,
   setDoc,
   serverTimestamp,
@@ -82,7 +80,7 @@ class ProgressService {
       if (settingsSnap.exists()) {
         // Update existing document
         console.log('ProgressService: Updating existing document');
-        const _existingData = settingsSnap.data();
+        // const _existingData = settingsSnap.data();
         await updateDoc(settingsRef, {
           weeklyDocumentGoal: weeklyGoal,
           updatedAt: serverTimestamp(),

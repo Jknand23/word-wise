@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { FileText, CheckCircle2, AlertCircle, ChevronRight, ChevronDown, Sparkles, Target, BookOpen, Flag, Lightbulb } from 'lucide-react';
 import { suggestionService } from '../../services/suggestionService';
 import { useWritingGoalsStore } from '../../store/writingGoalsStore';
@@ -25,20 +25,22 @@ const StructureSidebar: React.FC<StructureSidebarProps> = ({
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const { goals } = useWritingGoalsStore();
 
-  useEffect(() => {
-    if (documentId && userId) {
-      loadStructure();
-    }
-  }, [documentId, userId]);
+  // Initial load handled in effect below that depends on loadStructure
 
-  const loadStructure = async () => {
+  const loadStructure = useCallback(async () => {
     try {
       const existingStructure = await suggestionService.getDocumentStructure(documentId, userId);
       setStructure(existingStructure);
     } catch (error) {
       console.error('Failed to load structure:', error);
     }
-  };
+  }, [documentId, userId]);
+
+  useEffect(() => {
+    if (documentId && userId) {
+      loadStructure();
+    }
+  }, [documentId, userId, loadStructure]);
 
   const handleAnalyzeStructure = async () => {
     if (goals.assignmentType !== 'essay') {
@@ -117,7 +119,7 @@ const StructureSidebar: React.FC<StructureSidebarProps> = ({
     }
   };
 
-  const getSectionLabel = (section: EssaySection) => {
+  const getSectionLabel = useCallback((section: EssaySection) => {
     switch (section.type) {
       case 'introduction':
         return 'Introduction';
@@ -132,7 +134,7 @@ const StructureSidebar: React.FC<StructureSidebarProps> = ({
       default:
         return 'Section';
     }
-  };
+  }, []);
 
   const getStatusIcon = (section: EssaySection) => {
     if (section.isWeak) {

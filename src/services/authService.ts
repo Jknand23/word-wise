@@ -10,6 +10,24 @@ import {
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, googleProvider, db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
+/* removed unused FirebaseError import */
+
+function getErrorMessage(error: unknown): string {
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object' && 'message' in error) {
+    const msg = (error as { message?: unknown }).message;
+    return typeof msg === 'string' ? msg : 'Unknown error';
+  }
+  return 'Unknown error';
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (error && typeof error === 'object' && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    return typeof code === 'string' ? code : undefined;
+  }
+  return undefined;
+}
 
 export interface UserProfile {
   uid: string;
@@ -67,8 +85,8 @@ export const authService = {
       });
 
       return userCredential.user;
-    } catch (error: any) {
-      setError(error.message);
+    } catch (error: unknown) {
+      setError(getErrorMessage(error));
       throw error;
     }
   },
@@ -81,8 +99,8 @@ export const authService = {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       return userCredential.user;
-    } catch (error: any) {
-      setError(error.message);
+    } catch (error: unknown) {
+      setError(getErrorMessage(error));
       throw error;
     }
   },
@@ -116,14 +134,15 @@ export const authService = {
         clearError();
         return result.user;
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Google sign-in popup failed:', error);
-      if (error.code === 'auth/popup-closed-by-user') {
+      const code = getErrorCode(error);
+      if (code === 'auth/popup-closed-by-user') {
         setError('Sign-in was cancelled. Please try again.');
-      } else if (error.code === 'auth/popup-blocked') {
+      } else if (code === 'auth/popup-blocked') {
         setError('Popup was blocked by your browser. Please allow popups and try again.');
       } else {
-        setError(`Google sign-in failed: ${error.message}`);
+        setError(`Google sign-in failed: ${getErrorMessage(error)}`);
       }
       throw error;
     } finally {
@@ -160,9 +179,9 @@ export const authService = {
         console.log('No redirect result found');
         return null;
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error handling redirect result:", error);
-      setError(`Authentication error: ${error.message}`);
+      setError(`Authentication error: ${getErrorMessage(error)}`);
       throw error;
     }
   },
@@ -174,8 +193,8 @@ export const authService = {
 
     try {
       await signOut(auth);
-    } catch (error: any) {
-      setError(error.message);
+    } catch (error: unknown) {
+      setError(getErrorMessage(error));
       throw error;
     }
   },

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { LogOut, FileText, User, Trash2, BookOpen, Target, Zap, TrendingUp, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { authService } from '../../services/authService';
@@ -7,8 +7,9 @@ import { useProgressStore } from '../../stores/progressStore';
 import { documentService, type Document } from '../../services/documentService';
 import ProgressCards from './ProgressCards';
 import TestProgressButton from './TestProgressButton';
-import { DifferentialAnalysisTestButton } from './DifferentialAnalysisTestButton';
-import { DirectDifferentialTest } from './DirectDifferentialTest';
+// Debug components moved to temp folder for deployment
+// import { DifferentialAnalysisTestButton } from './DifferentialAnalysisTestButton';
+// import { DirectDifferentialTest } from './DirectDifferentialTest';
 
 const Dashboard = () => {
   const { user } = useAuthStore();
@@ -18,19 +19,7 @@ const Dashboard = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [totalDocuments, setTotalDocuments] = useState(0);
 
-  useEffect(() => {
-    if (user?.uid) {
-      loadRecentActivity();
-      loadProgress(user.uid);
-    }
-  }, [user?.uid, loadProgress]);
-
-  // Debug progress data changes
-  useEffect(() => {
-    console.log('Dashboard: Progress data updated:', progressData);
-  }, [progressData]);
-
-  const loadRecentActivity = async () => {
+  const loadRecentActivity = useCallback(async () => {
     if (!user?.uid) return;
     
     setIsLoading(true);
@@ -50,7 +39,21 @@ const Dashboard = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (user?.uid) {
+      loadRecentActivity();
+      loadProgress(user.uid);
+    }
+  }, [user?.uid, loadProgress, loadRecentActivity]);
+
+  // Debug progress data changes
+  useEffect(() => {
+    console.log('Dashboard: Progress data updated:', progressData);
+  }, [progressData]);
+
+  // loadRecentActivity defined above
 
   const handleSignOut = async () => {
     try {
@@ -227,8 +230,9 @@ const Dashboard = () => {
         {/* Test Buttons (Development Only) */}
         <div className="mb-8 space-y-4">
           <TestProgressButton />
-          <DifferentialAnalysisTestButton />
-          <DirectDifferentialTest />
+          {/* Debug components moved to temp folder for deployment */}
+          {/* <DifferentialAnalysisTestButton /> */}
+          {/* <DirectDifferentialTest /> */}
         </div>
 
         {/* Progress Tracking */}

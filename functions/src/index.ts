@@ -37,7 +37,12 @@ const commonOptions = {
 const OPENAI_MODEL = "gpt-4o"; // Upgraded from gpt-4-turbo-preview
 
 // Generate system prompt based on writing goals
-function generateSystemPrompt(writingGoals?: any): string {
+type WritingGoals = {
+  academicLevel?: 'middle-school' | 'high-school' | 'undergrad' | 'graduate';
+  grammarStrictness?: 'lenient' | 'moderate' | 'strict';
+};
+
+function generateSystemPrompt(writingGoals?: WritingGoals): string {
   const level = writingGoals?.academicLevel || 'high-school';
   const base = (categories: string, levelSpecific: string) => `${categories}
 
@@ -83,19 +88,28 @@ If no issues are found for a category, redistribute focus to other categories to
   switch (level) {
     case 'middle-school':
       return base(commonCategories, `MIDDLE SCHOOL FOCUS:
-- Fundamental writing skills, basic sentence construction
-- Simple, encouraging explanations
-- Emphasise complete sentences and basic punctuation`);
+- EMPHASIZE CLARITY AND SIMPLE SENTENCE STRUCTURE: Fix run-on sentences, sentence fragments, basic punctuation errors
+- FIX BASIC GRAMMAR: Subject-verb agreement, apostrophes, comma usage, end punctuation
+- ENCOURAGE CLEAR PARAGRAPH STRUCTURE: Topic sentences followed by supporting details, paragraph organization
+- RECOMMEND MORE SPECIFIC WORD CHOICES: Replace vague words with clearer, more precise alternatives
+- Use simple, encouraging explanations that build confidence
+- Avoid complex grammatical terminology - use student-friendly language`);
     case 'undergrad':
       return base(commonCategories, `UNDERGRADUATE FOCUS:
-- Rigorous analysis & sophisticated vocabulary
-- Aggressively flag run-ons and informal language
-- Demand academic tone and strong transitions`);
+- PUSH FOR DEPTH IN ARGUMENT AND CRITICAL THINKING: Challenge shallow analysis, demand evidence-based reasoning
+- ENSURE ADVANCED CLARITY IN COMPLEX SENTENCE STRUCTURES: Fix sophisticated syntax issues, parallel structure, subordination
+- RECOMMEND PRECISE ACADEMIC LANGUAGE AND CITATION INTEGRATION: Suggest disciplinary terminology, formal academic tone
+- FOCUS ON GLOBAL COHERENCE AND DISCIPLINE-SPECIFIC TONE: Overall argument flow, field-appropriate language
+- Expect sophisticated writing competency - flag informal language aggressively
+- Demand rigorous analysis and evidence-based arguments`);
     default: /* high-school */
       return base(commonCategories, `HIGH SCHOOL FOCUS:
-- Clear paragraph structure & topic sentences
-- Encourage precise word choice, basic transitions
-- Flag obvious run-ons but be moderate in strictness`);
+- SUPPORT THESIS CLARITY AND ARGUMENT STRUCTURE: Help develop clear thesis statements, logical argument flow
+- SUGGEST SMOOTHER TRANSITIONS AND SENTENCE VARIETY: Improve paragraph connections, varied sentence structures
+- IMPROVE TONE AND FORMALITY FOR ACADEMIC WRITING: Move toward formal academic voice, reduce casual language
+- HELP INTEGRATE EVIDENCE AND AVOID VAGUE OR REDUNDANT PHRASING: Support claims with specific examples, eliminate wordiness
+- Balance fundamentals with advanced skills - prepare for college-level writing
+- Encourage development of sophisticated argumentation while maintaining accessibility`);
   }
 }
 
@@ -310,7 +324,7 @@ async function getOpenAICompletion(
 
     try {
       return JSON.parse(responseContent);
-    } catch (initialParseError) {
+    } catch {
       logger.warn("⚠️ OpenAI response was not valid JSON. Retrying with simplified instructions.");
 
       // Retry once with an explicit instruction to limit suggestions to 50 items
@@ -331,8 +345,8 @@ async function getOpenAICompletion(
 
       try {
         return JSON.parse(retryContent);
-      } catch (retryParseError) {
-        logger.error("❌ Failed to parse OpenAI retry response:", { retryParseError, retryContent });
+      } catch {
+        logger.error("❌ Failed to parse OpenAI retry response:", { retryContent });
         // Rethrow the original parse error for upstream handling
         throw new HttpsError("internal", "Failed to parse OpenAI JSON response.");
       }
@@ -371,8 +385,8 @@ async function checkRateLimit(userId: string) {
   const data = userRateLimitDoc.data();
   if (!data) return false;
 
-  const recentRequests = data.requests.filter(
-    (req: any) => now - req.timestamp < RATE_LIMIT_WINDOW,
+  const recentRequests = (data.requests as Array<{ timestamp: number }>).filter(
+    (req) => now - req.timestamp < RATE_LIMIT_WINDOW,
   );
 
   if (recentRequests.length >= RATE_LIMIT_COUNT) {
@@ -388,7 +402,7 @@ async function checkRateLimit(userId: string) {
 // Cache service functions for Firebase environment
 const cacheService = {
   // ✅ CACHING SERVICE - Generate content hash for caching
-  generateContentHash(content: string | any[], writingGoals?: any, contextType: 'full' | 'contextWindow' = 'full'): string {
+  generateContentHash(content: string | Array<unknown>, writingGoals?: WritingGoals, contextType: 'full' | 'contextWindow' = 'full'): string {
     const hashData = {
       content: Array.isArray(content) ? content : content,
       writingGoals: writingGoals || {},
@@ -402,7 +416,7 @@ const cacheService = {
   },
 
   // ✅ Enhanced content hash that includes accepted suggestions context
-  generateContentHashWithHistory(content: string, writingGoals?: any, acceptedSuggestions: any[] = [], contextType: 'full' | 'contextWindow' = 'full'): string {
+  generateContentHashWithHistory(content: string, writingGoals?: WritingGoals, acceptedSuggestions: Array<{ originalText: string; suggestedText: string; type: string }> = [], contextType: 'full' | 'contextWindow' = 'full'): string {
     const hashData = {
       content: content,
       writingGoals: writingGoals || {},
@@ -421,7 +435,7 @@ const cacheService = {
     return this.simpleHash(hashString);
   },
 
-  async getCachedAnalysis(contentHash: string, userId: string): Promise<{ analysis: any; metadata: any } | null> {
+  async getCachedAnalysis(contentHash: string, userId: string): Promise<{ analysis: unknown; metadata: { tokenCount: number; timestamp: number; [k: string]: unknown } } | null> {
     try {
       const cacheRef = db.collection('analysisCache').doc(`${userId}_${contentHash}`);
       const cacheDoc = await cacheRef.get();
@@ -431,7 +445,7 @@ const cacheService = {
         return null;
       }
       
-      const cacheData = cacheDoc.data();
+      const cacheData = cacheDoc.data() as { expiresAt: { toDate: () => Date }; createdAt: { toDate: () => Date }; accessCount: number; metadata: { tokenCount: number; timestamp: number; [k: string]: unknown } } | undefined;
       if (!cacheData) return null;
       
       const now = new Date();
@@ -475,7 +489,7 @@ const cacheService = {
   async setCachedAnalysis(
     contentHash: string,
     userId: string,
-    analysis: any,
+    analysis: unknown,
     metadata: {
       documentId?: string;
       contextType: 'full' | 'contextWindow';
@@ -502,7 +516,7 @@ const cacheService = {
         expiresAt: FieldValue.serverTimestamp() // Will be updated with proper expiry
       };
       
-      const cacheRef = db.collection('analysisCache').doc(cacheEntry.id);
+      const cacheRef = db.collection('analysisCache').doc(cacheEntry.id as string);
       await cacheRef.set(cacheEntry);
       
       // Update with proper expiry time
@@ -542,7 +556,7 @@ export const analyzeSuggestions = onCall(commonOptions, async (request) => {
   console.log('🔍 [Firebase] analyzeSuggestions called with request data keys:', Object.keys(request.data));
   
   const startTime = Date.now();
-  let responseMetadata = {
+  const responseMetadata = {
     cached: false,
     tokenCount: 0,
     processingTime: 0,
@@ -575,7 +589,7 @@ export const analyzeSuggestions = onCall(commonOptions, async (request) => {
     responseMetadata.analysisType = contextWindow ? 'differential' : analysisType;
     
     // 🔧 NEW: Fetch accepted suggestions to prevent duplicates
-    let acceptedSuggestions: any[] = [];
+    let acceptedSuggestions: Array<{ originalText: string; suggestedText: string; type: string }> = [];
     if (documentId) {
       try {
         console.log('📋 [Firebase] Fetching accepted suggestions for duplicate prevention');
@@ -591,7 +605,7 @@ export const analyzeSuggestions = onCall(commonOptions, async (request) => {
         acceptedSuggestions = acceptedSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
-        }));
+        })) as Array<{ originalText: string; suggestedText: string; type: string }>;
         
         console.log(`📋 [Firebase] Found ${acceptedSuggestions.length} accepted suggestions for duplicate filtering`);
         
@@ -709,7 +723,7 @@ Return suggestions as JSON with the required format.`;
       const batch = db.batch();
       let successCount = 0;
       
-      suggestions.forEach((suggestion: any, index: number) => {
+      suggestions.forEach((suggestion: Record<string, unknown>, index: number) => {
         try {
           const suggestionRef = db.collection("suggestions").doc();
           
@@ -723,18 +737,18 @@ Return suggestions as JSON with the required format.`;
             updatedAt: FieldValue.serverTimestamp(),
             
             // Core suggestion data - use what AI provides or sensible defaults
-            originalText: suggestion.originalText || `Text ${index}`,
-            suggestedText: suggestion.suggestedText || `Improved text ${index}`,
-            type: suggestion.type || 'grammar', // Default to grammar instead of 'improvement'
-            category: suggestion.category || 'general',
-            severity: suggestion.severity || 'medium',
-            confidence: suggestion.confidence || 0.85,
-            explanation: suggestion.explanation || 'AI suggested improvement',
-            grammarRule: suggestion.grammarRule || null,
+            originalText: (suggestion.originalText as string) || `Text ${index}`,
+            suggestedText: (suggestion.suggestedText as string) || `Improved text ${index}`,
+            type: (suggestion.type as string) || 'grammar',
+            category: (suggestion.category as string) || 'general',
+            severity: (suggestion.severity as string) || 'medium',
+            confidence: (suggestion.confidence as number) || 0.85,
+            explanation: (suggestion.explanation as string) || 'AI suggested improvement',
+            grammarRule: (suggestion.grammarRule as string | null) || null,
             
             // Index handling - calculate from content if missing
-            startIndex: suggestion.startIndex || 0,
-            endIndex: suggestion.endIndex || (suggestion.originalText ? suggestion.originalText.length : 1),
+            startIndex: (suggestion.startIndex as number) || 0,
+            endIndex: (suggestion.endIndex as number) || ((suggestion.originalText as string | undefined)?.length ?? 1),
           };
           
           batch.set(suggestionRef, cleanSuggestion);
@@ -841,7 +855,7 @@ export const analyzeEssayStructure = onCall(corsOptions, async (request) => {
   // Save structure-related suggestions to Firestore
   if (structureSuggestions && structureSuggestions.length > 0) {
     const batch = db.batch();
-    structureSuggestions.forEach((suggestion: any) => {
+    structureSuggestions.forEach((suggestion: { [k: string]: unknown }) => {
       const suggestionRef = db.collection("suggestions").doc();
       batch.set(suggestionRef, {
         ...suggestion,
@@ -872,7 +886,16 @@ async function generateMockStructureAnalysis(
   assignmentType: string,
   academicLevel: string
 ) {
-  const sections: any[] = [];
+  const sections: Array<{
+    id: string;
+    type: 'introduction' | 'thesis' | 'body-paragraph' | 'conclusion' | 'transition';
+    startIndex: number;
+    endIndex: number;
+    text: string;
+    confidence: number;
+    metadata: { paragraphNumber: number; transitionQuality: 'weak' | 'moderate' | 'strong' };
+    suggestions?: string[];
+  }> = [];
   const paragraphs = content.split(/\n+/).filter(p => p.trim().length > 20);
   let currentIndex = 0;
   let prevParagraph: string | null = null;
@@ -998,7 +1021,7 @@ async function generateMockStructureAnalysis(
     },
   };
   
-  const structureSuggestions = sections.flatMap((section: any, index: number) => {
+  const structureSuggestions = sections.flatMap((section: { text: string; startIndex: number; endIndex: number; suggestions?: string[] }, index: number) => {
     return (section.suggestions as string[] | undefined)?.map((explanation: string, sugIndex: number) => ({
       id: `sug_struct_${index}_${sugIndex}`,
         documentId,
@@ -1269,9 +1292,9 @@ export const cleanupOldData = onSchedule("every 24 hours", async () => {
   const rateLimitsSnapshot = await db.collection("rateLimits").get();
   const rateLimitBatch = db.batch();
   rateLimitsSnapshot.forEach((doc) => {
-    const data = doc.data();
-    const recentRequests = data.requests.filter(
-      (req: any) => now - req.timestamp < RATE_LIMIT_WINDOW,
+    const data = doc.data() as { requests?: Array<{ timestamp: number }> };
+    const recentRequests = (data.requests || []).filter(
+      (req) => now - req.timestamp < RATE_LIMIT_WINDOW,
     );
     rateLimitBatch.update(doc.ref, { requests: recentRequests });
   });

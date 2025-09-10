@@ -69,7 +69,7 @@ const ProgressCards: React.FC<ProgressCardsProps> = ({ progressData, onUpdateWee
   };
 
   const renderProgressBar = () => {
-    const _percentage = getProgressPercentage();
+    getProgressPercentage();
     const segments = Array.from({ length: progressData.weeklyGoal }, (_, i) => i);
     
     return (

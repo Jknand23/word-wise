@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, Loader, Filter, AlertCircle, CheckCircle } from 'lucide-react';
+import { Sparkles, Loader } from 'lucide-react';
+import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
 import { useSuggestionStore } from '../../stores/suggestionStore';
 import { useParagraphTagStore } from '../../stores/paragraphTagStore';
-import { paragraphTagService } from '../../services/paragraphTagService';
 import SuggestionTooltip from './SuggestionTooltip';
 import ParagraphTagger from './ParagraphTagger';
 import type { Suggestion, EssaySection } from '../../types/suggestion';
@@ -25,7 +26,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
   selectedSuggestion,
   selectedSection = null,
   userId = 'demo-user',
-  highlightsVisible = true,
+  // highlightsVisible prop is accepted but not used to avoid unnecessary state
   onTagsChange
 }) => {
   const [content, setContent] = useState(initialContent);
@@ -34,16 +35,57 @@ const TextEditor: React.FC<TextEditorProps> = ({
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const [tooltipVisible, setTooltipVisible] = useState(false);
   const [hasAISuggestions, setHasAISuggestions] = useState(false);
-  const [scrollTop, setScrollTop] = useState(0);
+  const [, setScrollTop] = useState(0);
   const [paragraphBoundaries, setParagraphBoundaries] = useState<Array<{
     index: number;
     startPos: number;
     endPos: number;
     text: string;
-    actualTop: number;
   }>>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Get actual pixel position of a character in the textarea
+  const getCharacterPosition = React.useCallback((charIndex: number): number => {
+    if (!textareaRef.current) {
+      const textUpToChar = content.substring(0, charIndex);
+      const linesBefore = (textUpToChar.match(/\n/g) || []).length;
+      const computedLineHeight = parseFloat(window.getComputedStyle(textareaRef.current!).lineHeight || '24');
+      const computedPadding = parseFloat(window.getComputedStyle(textareaRef.current!).paddingTop || '16');
+      return linesBefore * computedLineHeight + computedPadding;
+    }
+    const textarea = textareaRef.current;
+    try {
+      const measureDiv = document.createElement('div');
+      const cs = window.getComputedStyle(textarea);
+      measureDiv.style.position = 'absolute';
+      measureDiv.style.visibility = 'hidden';
+      measureDiv.style.whiteSpace = 'pre-wrap';
+      measureDiv.style.wordWrap = 'break-word';
+      measureDiv.style.font = cs.font;
+      measureDiv.style.lineHeight = cs.lineHeight;
+      measureDiv.style.letterSpacing = cs.letterSpacing;
+      measureDiv.style.boxSizing = 'border-box';
+      measureDiv.style.width = `${textarea.clientWidth}px`;
+      measureDiv.style.padding = cs.padding;
+      measureDiv.style.border = 'none';
+      measureDiv.style.maxWidth = `${textarea.clientWidth}px`;
+      measureDiv.style.fontFamily = cs.fontFamily;
+      const textUpToChar = content.substring(0, charIndex);
+      measureDiv.textContent = textUpToChar;
+      document.body.appendChild(measureDiv);
+      const height = measureDiv.offsetHeight;
+      document.body.removeChild(measureDiv);
+      const paddingTop = parseFloat(cs.paddingTop || '0');
+      return Math.max(0, height - paddingTop);
+    } catch (error) {
+      console.error('Error calculating character position:', error);
+      const textUpToChar = content.substring(0, charIndex);
+      const linesBefore = (textUpToChar.match(/\n/g) || []).length;
+      const computedLineHeight = parseFloat(window.getComputedStyle(textareaRef.current!).lineHeight || '24');
+      const computedPadding = parseFloat(window.getComputedStyle(textareaRef.current!).paddingTop || '16');
+      return linesBefore * computedLineHeight + computedPadding;
+    }
+  }, [content]);
   const { 
     suggestions, 
     isAnalyzing, 
@@ -58,8 +100,8 @@ const TextEditor: React.FC<TextEditorProps> = ({
     loadTags,
     validateTags,
     getFilteredTags,
-    setFilter,
-    clearAllTags
+    // setFilter,
+    // clearAllTags
   } = useParagraphTagStore();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -222,7 +264,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
         });
       }
     }
-  }, [selectedSection]);
+  }, [selectedSection, content, getCharacterPosition]);
 
   const handleContentChange = (newContent: string) => {
     setContent(newContent);
@@ -273,7 +315,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
    * automatic background runs that occur after typing pauses or suggestion
    * acceptance.
    */
-  const handleAnalyzeClick = async (event?: React.MouseEvent<HTMLButtonElement>) => {
+  const handleAnalyzeClick = async () => {
     if (!content.trim()) return;
 
     if (isAnalyzing) {
@@ -305,8 +347,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
       setTimeout(async () => {
         console.log('🔍 [DEBUG] Auto-checking Firestore 3 seconds after analysis...');
         try {
-          const { collection, query, where, getDocs, orderBy } = await import('firebase/firestore');
-          const { db } = await import('../../lib/firebase');
+
 
           // Test both queries to compare results
           const qAll = query(
@@ -328,12 +369,12 @@ const TextEditor: React.FC<TextEditorProps> = ({
           console.log('🔍 [DEBUG] All suggestions query results:', {
             totalDocs: snapshotAll.docs.length,
             docs: snapshotAll.docs.slice(0, 3).map(doc => {
-              const data = doc.data() as any;
+              const data = doc.data() as Record<string, unknown>;
               return {
                 id: doc.id, 
-                status: data.status,
-                originalText: data.originalText,
-                type: data.type,
+                status: data.status as string,
+                originalText: data.originalText as string,
+                type: data.type as string,
                 createdAt: data.createdAt
               };
             })
@@ -345,12 +386,12 @@ const TextEditor: React.FC<TextEditorProps> = ({
             console.log('🔍 [DEBUG] Pending suggestions query results (same as subscription):', {
               totalDocs: snapshotPending.docs.length,
               docs: snapshotPending.docs.slice(0, 3).map(doc => {
-                const data = doc.data() as any;
+                const data = doc.data() as Record<string, unknown>;
                 return {
                   id: doc.id, 
-                  status: data.status,
-                  originalText: data.originalText,
-                  type: data.type,
+                  status: data.status as string,
+                  originalText: data.originalText as string,
+                  type: data.type as string,
                   createdAt: data.createdAt
                 };
               })
@@ -483,415 +524,87 @@ const TextEditor: React.FC<TextEditorProps> = ({
     }
   };
 
-  const renderHighlightedText = () => {
-    if (suggestions.length === 0 || !highlightsVisible) return content;
 
-    console.log('Rendering highlights for', suggestions.length, 'suggestions');
 
-    // Create a more robust suggestion validation
-    const validatedSuggestions = suggestions.map(suggestion => {
-      // First, try the original indices
-      const textAtOriginalIndices = content.slice(suggestion.startIndex, suggestion.endIndex);
-      
-      if (textAtOriginalIndices === suggestion.originalText) {
-        console.log(`✓ Suggestion "${suggestion.originalText}" valid at original position`);
-        return suggestion;
-      }
-      
-      // If original indices don't work, try to find the text in the content
-      const actualIndex = content.indexOf(suggestion.originalText);
-      if (actualIndex !== -1) {
-        console.log(`✓ Suggestion "${suggestion.originalText}" found at position ${actualIndex} (was ${suggestion.startIndex})`);
-        return {
-          ...suggestion,
-          startIndex: actualIndex,
-          endIndex: actualIndex + suggestion.originalText.length
-        };
-      }
-      
-      console.log(`✗ Suggestion "${suggestion.originalText}" not found in current content`);
-      return null;
-    }).filter(s => s !== null) as Suggestion[];
+  // const handleParagraphClick = (event: React.MouseEvent<HTMLDivElement>) => {
+  //   const target = event.target as HTMLElement;
+  //   if (target.tagName === 'SPAN' && target.dataset.suggestionId) {
+  //     const suggestionId = target.dataset.suggestionId;
+  //     const clickedSuggestion = suggestions.find(s => s.id === suggestionId);
+  //     if (clickedSuggestion) {
+  //       setTooltipSuggestion(clickedSuggestion);
+  //       const rect = target.getBoundingClientRect();
+  //       const x = rect.left - 345;
+  //       const y = rect.top;
+  //       setTooltipPosition({ x, y });
+  //       setTooltipVisible(true);
+  //       event.preventDefault();
+  //       return;
+  //     }
+  //   }
+  //   if (tooltipVisible) {
+  //     setTooltipVisible(false);
+  //     setTooltipSuggestion(null);
+  //   }
+  // };
 
-    // Filter out suggestions from "Done" paragraphs only if we have tags
-    let finalSuggestions = validatedSuggestions;
-    if (tags && tags.length > 0) {
-      try {
-        const paragraphs = paragraphTagService.extractParagraphs(content);
-        const doneParagraphs = tags
-          .filter(tag => tag.tagType === 'done')
-          .map(tag => tag.paragraphIndex);
-        
-        if (doneParagraphs.length > 0) {
-          finalSuggestions = validatedSuggestions.filter(suggestion => {
-            for (let i = 0; i < paragraphs.length; i++) {
-              if (doneParagraphs.includes(i)) {
-                const paragraph = paragraphs[i];
-                if (suggestion.startIndex >= paragraph.startIndex && 
-                    suggestion.endIndex <= paragraph.endIndex) {
-                  console.log(`Filtering out suggestion from "Done" paragraph: "${suggestion.originalText}"`);
-                  return false;
-                }
-              }
-            }
-            return true;
-          });
-        }
-      } catch (error) {
-        console.warn('Error filtering by paragraph tags, showing all suggestions:', error);
-      }
-    }
+  // const renderParagraphWithHighlights = (paragraphText: string, paragraphStartIndex: number) => {
+  //   if (!highlightsVisible || suggestions.length === 0) {
+  //     return escapeHtml(paragraphText);
+  //   }
+  //   const paragraphEndIndex = paragraphStartIndex + paragraphText.length;
+  //   const relevantSuggestions = suggestions.filter(suggestion => {
+  //     const overlaps = suggestion.startIndex < paragraphEndIndex && suggestion.endIndex > paragraphStartIndex;
+  //     const existsInParagraph = paragraphText.includes(suggestion.originalText);
+  //     return overlaps || existsInParagraph;
+  //   });
+  //   const validSuggestions = relevantSuggestions.map(suggestion => {
+  //     const textAtPosition = content.slice(suggestion.startIndex, suggestion.endIndex);
+  //     if (textAtPosition === suggestion.originalText) return suggestion;
+  //     const globalIndex = content.indexOf(suggestion.originalText);
+  //     if (globalIndex !== -1) return { ...suggestion, startIndex: globalIndex, endIndex: globalIndex + suggestion.originalText.length };
+  //     const paragraphIndex = paragraphText.indexOf(suggestion.originalText);
+  //     if (paragraphIndex !== -1) return { ...suggestion, startIndex: paragraphStartIndex + paragraphIndex, endIndex: paragraphStartIndex + paragraphIndex + suggestion.originalText.length };
+  //     return null;
+  //   }).filter(s => s !== null) as Suggestion[];
+  //   const paragraphSuggestions = validSuggestions.filter(suggestion => suggestion.startIndex >= paragraphStartIndex && suggestion.endIndex <= paragraphEndIndex);
+  //   if (paragraphSuggestions.length === 0) return escapeHtml(paragraphText);
+  //   const sortedSuggestions = paragraphSuggestions.sort((a, b) => a.startIndex - b.startIndex);
+  //   let highlightedContent = '';
+  //   let lastIndex = paragraphStartIndex;
+  //   sortedSuggestions.forEach((suggestion) => {
+  //     const beforeText = content.slice(lastIndex, suggestion.startIndex);
+  //     highlightedContent += escapeHtml(beforeText);
+  //     const suggestionText = content.slice(suggestion.startIndex, suggestion.endIndex);
+  //     const isSelected = selectedSuggestion?.id === suggestion.id;
+  //     const colorClass = isSelected ? getSuggestionSelectedHighlightColor(suggestion.type) : getSuggestionHighlightColor(suggestion.type);
+  //     highlightedContent += `<span class="${colorClass}" data-suggestion-id="${suggestion.id}">${escapeHtml(suggestionText)}</span>`;
+  //     lastIndex = suggestion.endIndex;
+  //   });
+  //   const remainingText = content.slice(lastIndex, paragraphEndIndex);
+  //   highlightedContent += escapeHtml(remainingText);
+  //   return highlightedContent;
+  // };
 
-    console.log(`Final suggestions to highlight: ${finalSuggestions.length}/${suggestions.length}`);
+  // const handleParagraphEdit = (paragraphIndex: number, newText: string) => {
+  //   const paragraphs = paragraphTagService.extractParagraphs(content);
+  //   let newContent = '';
+  //   paragraphs.forEach((p, idx) => {
+  //     if (idx === paragraphIndex) {
+  //       newContent += newText;
+  //     } else {
+  //       newContent += p.text;
+  //     }
+  //     if (idx < paragraphs.length - 1) {
+  //       newContent += '\n\n';
+  //     }
+  //   });
+  //   handleContentChange(newContent);
+  // };
 
-    if (finalSuggestions.length === 0) return content;
+  // Note: Filter UI helpers removed as they were unused
 
-    // Sort suggestions by start index and render highlights
-    const sortedSuggestions = finalSuggestions.sort((a, b) => a.startIndex - b.startIndex);
-    let highlightedContent = '';
-    let lastIndex = 0;
-
-    sortedSuggestions.forEach((suggestion) => {
-      // Skip overlapping suggestions
-      if (suggestion.startIndex < lastIndex) {
-        console.log(`Skipping overlapping suggestion: "${suggestion.originalText}"`);
-        return;
-      }
-      
-      // Skip out-of-bounds suggestions
-      if (suggestion.startIndex >= content.length || suggestion.endIndex > content.length) {
-        console.log(`Skipping out-of-bounds suggestion: "${suggestion.originalText}"`);
-        return;
-      }
-      
-      // Add text before suggestion
-      const beforeText = content.slice(lastIndex, suggestion.startIndex);
-      highlightedContent += escapeHtml(beforeText);
-      
-      // Add highlighted suggestion text with special styling for selected suggestion
-      const suggestionText = content.slice(suggestion.startIndex, suggestion.endIndex);
-      const isSelected = selectedSuggestion?.id === suggestion.id;
-      const baseColorClass = getSuggestionHighlightColor(suggestion.type);
-      const selectedClass = isSelected ? getSuggestionSelectedHighlightColor(suggestion.type) : baseColorClass;
-      const colorClass = selectedClass;
-      
-      highlightedContent += `<span class="${colorClass}" data-suggestion-id="${suggestion.id}">${escapeHtml(suggestionText)}</span>`;
-      
-      lastIndex = suggestion.endIndex;
-    });
-
-    // Add remaining text
-    const remainingText = content.slice(lastIndex);
-    highlightedContent += escapeHtml(remainingText);
-    
-    return highlightedContent;
-  };
-
-  // Helper function to escape HTML characters
-  const escapeHtml = (text: string) => {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  };
-
-  const getSuggestionHighlightColor = (type: Suggestion['type']) => {
-    switch (type) {
-      case 'spelling':
-        return 'bg-red-200 bg-opacity-30 border-b-2 border-red-400 cursor-pointer hover:bg-opacity-50';
-      case 'clarity':
-        return 'bg-yellow-200 bg-opacity-30 border-b-2 border-yellow-400 cursor-pointer hover:bg-opacity-50';
-      case 'engagement':
-        return 'bg-blue-200 bg-opacity-30 border-b-2 border-blue-400 cursor-pointer hover:bg-opacity-50';
-      case 'grammar':
-        return 'bg-orange-200 bg-opacity-30 border-b-2 border-orange-400 cursor-pointer hover:bg-opacity-50';
-      case 'tone':
-        return 'bg-purple-200 bg-opacity-30 border-b-2 border-purple-400 cursor-pointer hover:bg-opacity-50';
-      case 'structure':
-        return 'bg-green-200 bg-opacity-30 border-b-2 border-green-400 cursor-pointer hover:bg-opacity-50';
-      case 'depth':
-        return 'bg-indigo-200 bg-opacity-30 border-b-2 border-indigo-400 cursor-pointer hover:bg-opacity-50';
-      case 'vocabulary':
-        return 'bg-pink-200 bg-opacity-30 border-b-2 border-pink-400 cursor-pointer hover:bg-opacity-50';
-      default:
-        return 'bg-gray-200 bg-opacity-30 border-b-2 border-gray-400 cursor-pointer hover:bg-opacity-50';
-    }
-  };
-
-  const getSuggestionSelectedHighlightColor = (type: Suggestion['type']) => {
-    switch (type) {
-      case 'spelling':
-        return 'bg-red-400 bg-opacity-80 border-b-2 border-red-600 cursor-pointer shadow-lg';
-      case 'clarity':
-        return 'bg-yellow-400 bg-opacity-80 border-b-2 border-yellow-600 cursor-pointer shadow-lg';
-      case 'engagement':
-        return 'bg-blue-400 bg-opacity-80 border-b-2 border-blue-600 cursor-pointer shadow-lg';
-      case 'grammar':
-        return 'bg-orange-400 bg-opacity-80 border-b-2 border-orange-600 cursor-pointer shadow-lg';
-      case 'tone':
-        return 'bg-purple-400 bg-opacity-80 border-b-2 border-purple-600 cursor-pointer shadow-lg';
-      case 'structure':
-        return 'bg-green-400 bg-opacity-80 border-b-2 border-green-600 cursor-pointer shadow-lg';
-      case 'depth':
-        return 'bg-indigo-400 bg-opacity-80 border-b-2 border-indigo-600 cursor-pointer shadow-lg';
-      case 'vocabulary':
-        return 'bg-pink-400 bg-opacity-80 border-b-2 border-pink-600 cursor-pointer shadow-lg';
-      default:
-        return 'bg-gray-400 bg-opacity-80 border-b-2 border-gray-600 cursor-pointer shadow-lg';
-    }
-  };
-
-  const handleParagraphClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    const target = event.target as HTMLElement;
-    
-    // Check if we clicked on a suggestion span
-    if (target.tagName === 'SPAN' && target.dataset.suggestionId) {
-      const suggestionId = target.dataset.suggestionId;
-      const clickedSuggestion = suggestions.find(s => s.id === suggestionId);
-      
-      if (clickedSuggestion) {
-        // Show tooltip for this suggestion
-        setTooltipSuggestion(clickedSuggestion);
-        
-        // Position tooltip relative to the clicked element
-        const rect = target.getBoundingClientRect();
-        const x = rect.left - 345; // 325px width + 20px gap
-        const y = rect.top;
-        
-        setTooltipPosition({ x, y });
-        setTooltipVisible(true);
-        
-        event.preventDefault();
-        return;
-      }
-    }
-    
-    // Normal text click - hide tooltip
-    if (tooltipVisible) {
-      setTooltipVisible(false);
-      setTooltipSuggestion(null);
-    }
-  };
-
-  const renderParagraphWithHighlights = (paragraphText: string, paragraphStartIndex: number) => {
-    if (!highlightsVisible || suggestions.length === 0) {
-      return escapeHtml(paragraphText);
-    }
-
-    const paragraphEndIndex = paragraphStartIndex + paragraphText.length;
-    console.log(`[Paragraph ${paragraphStartIndex}-${paragraphEndIndex}] Rendering with ${suggestions.length} suggestions`);
-
-    // Find all suggestions that might be relevant to this paragraph
-    const relevantSuggestions = suggestions.filter(suggestion => {
-      // Check if suggestion overlaps with this paragraph
-      const overlaps = suggestion.startIndex < paragraphEndIndex && suggestion.endIndex > paragraphStartIndex;
-      
-      // Also check if the suggestion text exists within this paragraph
-      const existsInParagraph = paragraphText.includes(suggestion.originalText);
-      
-      return overlaps || existsInParagraph;
-    });
-
-    console.log(`[Paragraph ${paragraphStartIndex}] Found ${relevantSuggestions.length} relevant suggestions`);
-
-    // Validate and correct suggestion positions
-    const validSuggestions = relevantSuggestions.map(suggestion => {
-      // Check if suggestion is at expected position
-      const textAtPosition = content.slice(suggestion.startIndex, suggestion.endIndex);
-      if (textAtPosition === suggestion.originalText) {
-        return suggestion;
-      }
-      
-      // Try to find the text in the global content
-      const globalIndex = content.indexOf(suggestion.originalText);
-      if (globalIndex !== -1) {
-        return {
-          ...suggestion,
-          startIndex: globalIndex,
-          endIndex: globalIndex + suggestion.originalText.length
-        };
-      }
-      
-      // Try to find within this specific paragraph
-      const paragraphIndex = paragraphText.indexOf(suggestion.originalText);
-      if (paragraphIndex !== -1) {
-        const correctedStart = paragraphStartIndex + paragraphIndex;
-        return {
-          ...suggestion,
-          startIndex: correctedStart,
-          endIndex: correctedStart + suggestion.originalText.length
-        };
-      }
-      
-      return null;
-    }).filter(s => s !== null) as Suggestion[];
-
-    // Filter to only suggestions that actually fall within this paragraph
-    const paragraphSuggestions = validSuggestions.filter(suggestion => 
-      suggestion.startIndex >= paragraphStartIndex && 
-      suggestion.endIndex <= paragraphEndIndex
-    );
-
-    console.log(`[Paragraph ${paragraphStartIndex}] Final paragraph suggestions: ${paragraphSuggestions.length}`);
-
-    if (paragraphSuggestions.length === 0) {
-      return escapeHtml(paragraphText);
-    }
-
-    // Sort by position and render highlights
-    const sortedSuggestions = paragraphSuggestions.sort((a, b) => a.startIndex - b.startIndex);
-    let highlightedContent = '';
-    let lastIndex = paragraphStartIndex;
-
-    sortedSuggestions.forEach((suggestion) => {
-      // Add text before suggestion
-      const beforeText = content.slice(lastIndex, suggestion.startIndex);
-      highlightedContent += escapeHtml(beforeText);
-      
-      // Add highlighted suggestion text with selection emphasis
-      const suggestionText = content.slice(suggestion.startIndex, suggestion.endIndex);
-      const isSelected = selectedSuggestion?.id === suggestion.id;
-      const colorClass = isSelected ? getSuggestionSelectedHighlightColor(suggestion.type) : getSuggestionHighlightColor(suggestion.type);
-      
-      highlightedContent += `<span class="${colorClass}" data-suggestion-id="${suggestion.id}">${escapeHtml(suggestionText)}</span>`;
-      
-      lastIndex = suggestion.endIndex;
-    });
-
-    // Add remaining paragraph text
-    const remainingText = content.slice(lastIndex, paragraphEndIndex);
-    highlightedContent += escapeHtml(remainingText);
-    
-    return highlightedContent;
-  };
-
-  const handleParagraphEdit = (paragraphIndex: number, newText: string) => {
-    const paragraphs = paragraphTagService.extractParagraphs(content);
-    let newContent = '';
-    
-    paragraphs.forEach((p, idx) => {
-      if (idx === paragraphIndex) {
-        newContent += newText;
-      } else {
-        newContent += p.text;
-      }
-      // Add paragraph separator if not the last paragraph
-      if (idx < paragraphs.length - 1) {
-        newContent += '\n\n';
-      }
-    });
-    
-    handleContentChange(newContent);
-  };
-
-  const renderParagraphsWithTags = () => {
-    if (!content.trim()) {
-      return (
-        <div className="p-8 text-center text-gray-500">
-          <p>Start writing to see your content here...</p>
-        </div>
-      );
-    }
-
-    const paragraphs = paragraphTagService.extractParagraphs(content);
-    const filteredTags = getFilteredTags();
-    
-    return paragraphs.map((paragraph, index) => {
-      const tag = tags.find(t => t.paragraphIndex === index);
-      const isFiltered = filteredByTag && filteredByTag !== 'all';
-      const shouldShow = !isFiltered || (tag && filteredTags.includes(tag));
-      
-      if (!shouldShow) return null;
-      
-      const hasTag = !!tag;
-      const tagType = tag?.tagType;
-      
-      let paragraphBorderClass = '';
-      if (hasTag) {
-        paragraphBorderClass = tagType === 'needs-review' 
-          ? 'border-l-4 border-yellow-400 bg-yellow-50' 
-          : 'border-l-4 border-green-400 bg-green-50';
-      }
-
-      // Don't show suggestions for "Done" paragraphs
-      const showSuggestions = !hasTag || tagType !== 'done';
-      const paragraphContent = showSuggestions 
-        ? renderParagraphWithHighlights(paragraph.text, paragraph.startIndex)
-        : escapeHtml(paragraph.text);
-
-      return (
-        <div key={index} className={`mb-4 p-2 rounded-r-md ${paragraphBorderClass}`}>
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1 min-w-0">
-              <div 
-                className="text-gray-800 leading-relaxed whitespace-pre-wrap break-words cursor-text outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 rounded px-1"
-                contentEditable={true}
-                suppressContentEditableWarning={true}
-                dangerouslySetInnerHTML={{ __html: paragraphContent }}
-                onClick={(e) => handleParagraphClick(e)}
-                onInput={(e) => {
-                  const target = e.target as HTMLDivElement;
-                  const newText = target.textContent || '';
-                  handleParagraphEdit(index, newText);
-                }}
-                onBlur={(e) => {
-                  // Re-render with highlights after editing
-                  const target = e.target as HTMLDivElement;
-                  const newText = target.textContent || '';
-                  if (newText !== paragraph.text) {
-                    handleParagraphEdit(index, newText);
-                  }
-                }}
-              />
-              {tag?.note && (
-                <p className="text-sm text-gray-600 mt-2 italic">
-                  Note: {tag.note}
-                </p>
-              )}
-            </div>
-            <div className="flex-shrink-0">
-              <ParagraphTagger
-                documentId={documentId}
-                userId={userId}
-                content={paragraph.text}
-                fullDocumentContent={content}
-                paragraphIndex={index}
-                onTagUpdate={onTagsChange}
-              />
-            </div>
-          </div>
-        </div>
-      );
-    }).filter(Boolean);
-  };
-
-  // Filter functions for paragraph tags
-  const handleFilterChange = (filter: 'all' | 'needs-review' | 'done') => {
-    setFilter(filter);
-  };
-
-  const getFilterButtonClass = (filterType: 'all' | 'needs-review' | 'done') => {
-    const isActive = filteredByTag === filterType;
-    const baseClass = 'px-3 h-7 text-xs font-semibold rounded-full transition-colors duration-200 whitespace-nowrap flex items-center';
-    
-    if (isActive) {
-      switch (filterType) {
-        case 'needs-review':
-          return `${baseClass} bg-yellow-500 text-white shadow-sm`;
-        case 'done':
-          return `${baseClass} bg-green-600 text-white shadow-sm`;
-        default:
-          return `${baseClass} bg-blue-600 text-white shadow-sm`;
-      }
-    }
-    
-    return `${baseClass} bg-gray-100 text-gray-600 hover:bg-gray-200 border border-transparent`;
-  };
-
-  const filteredTags = getFilteredTags();
-  const needsReviewCount = tags.filter(tag => tag.tagType === 'needs-review').length;
-  const doneCount = tags.filter(tag => tag.tagType === 'done').length;
-
-  // Calculate paragraph boundaries for tag positioning
+  // Calculate paragraph boundaries for tag positioning (without layout positions)
   const calculateParagraphBoundaries = (text: string) => {
     if (!text.trim()) return [];
     
@@ -900,7 +613,6 @@ const TextEditor: React.FC<TextEditorProps> = ({
       startPos: number;
       endPos: number;
       text: string;
-      actualTop: number;
     }> = [];
     
     // Split by double newlines to get paragraphs
@@ -915,15 +627,11 @@ const TextEditor: React.FC<TextEditorProps> = ({
         const startPos = currentPosition;
         const endPos = currentPosition + section.length;
         
-        // Get actual position using textarea's coordinate system
-        const actualTop = getCharacterPosition(startPos);
-        
         boundaries.push({
           index: paragraphIndex,
           startPos,
           endPos,
-          text: trimmedSection,
-          actualTop
+          text: trimmedSection
         });
         
         paragraphIndex++;
@@ -939,61 +647,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
     return boundaries;
   };
 
-  // Get actual pixel position of a character in the textarea
-  const getCharacterPosition = (charIndex: number): number => {
-    if (!textareaRef.current) {
-      // Fallback to simple calculation if textarea not available
-      const textUpToChar = content.substring(0, charIndex);
-      const linesBefore = (textUpToChar.match(/\n/g) || []).length;
-      const computedLineHeight = parseFloat(window.getComputedStyle(textareaRef.current!).lineHeight || '24');
-      const computedPadding = parseFloat(window.getComputedStyle(textareaRef.current!).paddingTop || '16');
-      return linesBefore * computedLineHeight + computedPadding;
-    }
-    
-    const textarea = textareaRef.current;
-    
-    try {
-      // Create a temporary div to measure text position
-      const measureDiv = document.createElement('div');
-      const cs = window.getComputedStyle(textarea);
-
-      // Mirror the textarea styles as closely as possible
-      measureDiv.style.position = 'absolute';
-      measureDiv.style.visibility = 'hidden';
-      measureDiv.style.whiteSpace = 'pre-wrap';
-      measureDiv.style.wordWrap = 'break-word';
-      measureDiv.style.font = cs.font;
-      measureDiv.style.lineHeight = cs.lineHeight;
-      measureDiv.style.letterSpacing = cs.letterSpacing;
-      measureDiv.style.boxSizing = 'border-box';
-
-      // Match the exact inner width of the textarea (including padding)
-      measureDiv.style.width = `${textarea.clientWidth}px`;
-      measureDiv.style.padding = cs.padding;
-      measureDiv.style.border = 'none';
-      measureDiv.style.maxWidth = `${textarea.clientWidth}px`;
-      measureDiv.style.fontFamily = cs.fontFamily;
-      
-      // Add text up to the character position
-      const textUpToChar = content.substring(0, charIndex);
-      measureDiv.textContent = textUpToChar;
-      
-      document.body.appendChild(measureDiv);
-      const height = measureDiv.offsetHeight;
-      document.body.removeChild(measureDiv);
-      
-      const paddingTop = parseFloat(cs.paddingTop || '0');
-      return Math.max(0, height - paddingTop); // Subtract top padding, ensure non-negative
-    } catch (error) {
-      console.error('Error calculating character position:', error);
-      // Fallback to simple calculation
-      const textUpToChar = content.substring(0, charIndex);
-      const linesBefore = (textUpToChar.match(/\n/g) || []).length;
-      const computedLineHeight = parseFloat(window.getComputedStyle(textareaRef.current!).lineHeight || '24');
-      const computedPadding = parseFloat(window.getComputedStyle(textareaRef.current!).paddingTop || '16');
-      return linesBefore * computedLineHeight + computedPadding;
-    }
-  };
+  // moved earlier definition; remove duplicate
 
   // Handle container scroll to update tag positions
   const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
@@ -1010,13 +664,13 @@ const TextEditor: React.FC<TextEditorProps> = ({
         const matchingBoundary = paragraphBoundaries.find(b => b.index === matchingTag.paragraphIndex);
         if (matchingBoundary && containerRef.current) {
           containerRef.current.scrollTo({
-            top: Math.max(0, matchingBoundary.actualTop - 40),
+            top: Math.max(0, getCharacterPosition(matchingBoundary.startPos) - 40),
             behavior: 'smooth'
           });
         }
       }
     }
-  }, [filteredByTag]);
+  }, [filteredByTag, paragraphBoundaries, tags, getCharacterPosition]);
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -1085,12 +739,11 @@ const TextEditor: React.FC<TextEditorProps> = ({
               {content.trim() && paragraphBoundaries.length > 0 && (
                 <>
                   {/* Highlight overlay for paragraph filtering */}
-                  {filteredByTag && filteredByTag !== 'all' && (
+                  {filteredByTag && filteredByTag !== 'all' && textareaRef.current && (
                     <div className="absolute inset-0 pointer-events-none">
-                      {paragraphBoundaries.map((boundary, i) => {
-                        const next = paragraphBoundaries[i + 1];
-                        const startY = boundary.actualTop;
-                        const endY = next ? next.actualTop : textareaRef.current?.scrollHeight || 0;
+                      {paragraphBoundaries.map((boundary) => {
+                        const startY = getCharacterPosition(boundary.startPos);
+                        const endY = getCharacterPosition(boundary.endPos);
                         const height = Math.max(0, endY - startY);
                         const tagForParagraph = tags.find(t => t.paragraphIndex === boundary.index);
                         const shouldDim = !tagForParagraph || tagForParagraph.tagType !== filteredByTag;
@@ -1124,7 +777,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
                           key={boundary.index}
                           className="absolute right-4 pointer-events-auto transition-all duration-200"
                           style={{
-                            top: `${boundary.actualTop}px`
+                            top: `${getCharacterPosition(boundary.startPos)}px`
                           }}
                         >
                           <ParagraphTagger

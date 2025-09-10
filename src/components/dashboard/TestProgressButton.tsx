@@ -3,7 +3,8 @@ import { TestTube, Trash2, RefreshCw } from 'lucide-react';
 import { generateTestProgressData, clearTestProgressData } from '../../utils/testProgressData';
 import { useAuthStore } from '../../store/authStore';
 import { useProgressStore } from '../../stores/progressStore';
-import { cachePerformanceTesting } from '../../utils/cachePerformanceTesting';
+// Debug utility moved to temp folder for deployment
+// import { cachePerformanceTesting } from '../../utils/cachePerformanceTesting';
 
 const TestProgressButton: React.FC = () => {
   const { user } = useAuthStore();
@@ -68,7 +69,18 @@ const TestProgressButton: React.FC = () => {
     try {
       console.log('🧪 Starting Cache Performance Test...');
       
-      const cacheTestResult = await cachePerformanceTesting.runBasicCacheTest(user.uid);
+      // Temporary stub for deployment - cachePerformanceTesting moved to temp folder
+      const cacheTestResult = { 
+        summary: { 
+          passedTests: 0, 
+          totalTests: 0, 
+          averageCacheHitRate: 0, 
+          totalSavingsPercentage: 0, 
+          averageResponseTime: 0, 
+          testDuration: 0 
+        },
+        results: []
+      };
       const { summary } = cacheTestResult;
       
       const cacheReport = `Cache Performance Test Results:

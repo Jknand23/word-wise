@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { CheckCircle, XCircle, AlertTriangle, Lightbulb, Sparkles, Type, Loader, Eye, EyeOff, MessageSquare, Layout, Brain, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useSuggestionStore } from '../../stores/suggestionStore';
 import { useParagraphTagStore } from '../../stores/paragraphTagStore';
+import { useWritingGoalsStore } from '../../store/writingGoalsStore';
 import { modificationTrackingService } from '../../services/modificationTrackingService';
+import { GradeLevelSuggestionFilter } from '../../services/gradeLevelSuggestionFilter';
 import type { Suggestion, ModifiedArea } from '../../types/suggestion';
 
 interface SuggestionsPanelProps {
@@ -25,7 +27,7 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   onToggleHighlights
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('correctness');
-  const [modifiedAreas, setModifiedAreas] = useState<ModifiedArea[]>([]);
+  const [, setModifiedAreas] = useState<ModifiedArea[]>([]);
   const [highlightsVisible, setHighlightsVisible] = useState<boolean>(true);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
@@ -42,6 +44,7 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   } = useSuggestionStore();
 
   const { tags } = useParagraphTagStore();
+  const { goals } = useWritingGoalsStore();
 
   // 🔍 DEBUG: Log suggestions from store
   useEffect(() => {
@@ -52,9 +55,10 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
       error,
       documentId,
       userId,
+      academicLevel: goals.academicLevel,
       suggestions: suggestions.slice(0, 2) // Show first 2 for debugging
     });
-  }, [suggestions, isLoading, isAnalyzing, error, documentId, userId]);
+  }, [suggestions, isLoading, isAnalyzing, error, documentId, userId, goals.academicLevel]);
 
   // Load modified areas for filtering
   useEffect(() => {
@@ -69,10 +73,42 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   }, [documentId, userId, suggestions.length]); // Refresh when suggestions change
 
   // First filter suggestions to exclude those from "Done" paragraphs
-  const paragraphFilteredSuggestions = getFilteredSuggestions(content, tags);
+  const paragraphFilteredSuggestions = useMemo(() => getFilteredSuggestions(content, tags), [getFilteredSuggestions, content, tags]);
 
-  // Then filter to exclude over-modified areas
-  const filteredSuggestions = paragraphFilteredSuggestions;
+  // Then filter based on academic level for appropriate developmental focus
+  const gradeLevelFilteredSuggestions = useMemo(() => (
+    GradeLevelSuggestionFilter.filterSuggestions(
+      paragraphFilteredSuggestions,
+      goals.academicLevel
+    )
+  ), [paragraphFilteredSuggestions, goals.academicLevel]);
+
+  // Final filtered suggestions
+  const filteredSuggestions = gradeLevelFilteredSuggestions;
+
+  // 🔍 DEBUG: Log grade-level filtering results
+  useEffect(() => {
+    if (paragraphFilteredSuggestions.length > 0) {
+      console.log('📚 [SuggestionsPanel] Grade-level filtering applied:', {
+        academicLevel: goals.academicLevel,
+        originalCount: paragraphFilteredSuggestions.length,
+        filteredCount: filteredSuggestions.length,
+        removedCount: paragraphFilteredSuggestions.length - filteredSuggestions.length,
+        originalTypes: [...new Set(paragraphFilteredSuggestions.map(s => s.type))],
+        filteredTypes: [...new Set(filteredSuggestions.map(s => s.type))],
+        samplesBeforeFiltering: paragraphFilteredSuggestions.slice(0, 3).map(s => ({ 
+          type: s.type, 
+          severity: s.severity, 
+          originalText: s.originalText.substring(0, 30) 
+        })),
+        samplesAfterFiltering: filteredSuggestions.slice(0, 3).map(s => ({ 
+          type: s.type, 
+          severity: s.severity, 
+          originalText: s.originalText.substring(0, 30) 
+        }))
+      });
+    }
+  }, [paragraphFilteredSuggestions, filteredSuggestions, goals.academicLevel]);
 
   const getSuggestionIcon = (type: Suggestion['type']) => {
     const iconProps = { className: "w-4 h-4" };
@@ -125,40 +161,39 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   }, [filteredSuggestions]);
 
   // Helper function to normalize suggestion types (handle case-insensitive matching)
-  const normalizeType = (type: string): string => {
+  const normalizeType = useCallback((type: string): string => {
     return type.toLowerCase();
-  };
+  }, []);
 
   // Helper function to check if type belongs to a category (case-insensitive)
-  const isCorrectnessType = (type: string): boolean => {
+  const isCorrectnessType = useCallback((type: string): boolean => {
     const normalized = normalizeType(type);
     return ['grammar', 'spelling'].includes(normalized);
-  };
+  }, [normalizeType]);
 
-  const isClarityType = (type: string): boolean => {
+  const isClarityType = useCallback((type: string): boolean => {
     const normalized = normalizeType(type);
     return normalized === 'clarity';
-  };
+  }, [normalizeType]);
 
-  const isEngagementType = (type: string): boolean => {
+  const isEngagementType = useCallback((type: string): boolean => {
     const normalized = normalizeType(type);
     return normalized === 'engagement';
-  };
+  }, [normalizeType]);
 
-  const isAdvancedType = (type: string): boolean => {
+  const isAdvancedType = useCallback((type: string): boolean => {
     const normalized = normalizeType(type);
     return ['tone', 'structure', 'depth', 'vocabulary'].includes(normalized);
-  };
+  }, [normalizeType]);
 
   // Group filtered suggestions by tab categories - HANDLE CASE-INSENSITIVE TYPES
-  const categorizedSuggestions = {
+  const categorizedSuggestions = useMemo(() => ({
     correctness: filteredSuggestions.filter(s => isCorrectnessType(s.type)),
     clarity: filteredSuggestions.filter(s => isClarityType(s.type)),
     engagement: filteredSuggestions.filter(s => isEngagementType(s.type)),
     advanced: filteredSuggestions.filter(s => isAdvancedType(s.type)),
-    // Handle any unknown types by putting them in correctness for now
     unknown: filteredSuggestions.filter(s => !isCorrectnessType(s.type) && !isClarityType(s.type) && !isEngagementType(s.type) && !isAdvancedType(s.type))
-  };
+  }), [filteredSuggestions, isCorrectnessType, isClarityType, isEngagementType, isAdvancedType]);
 
   // If we have unknown types, add them to correctness tab
   if (categorizedSuggestions.unknown.length > 0) {
@@ -170,17 +205,17 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
   const structureSuggestionsCount = categorizedSuggestions.advanced.filter(s => s.type === 'structure').length;
 
   // Get the suggestions for the currently active tab
-  const activeSuggestions = categorizedSuggestions[activeTab];
+  const activeSuggestions = useMemo(() => categorizedSuggestions[activeTab], [categorizedSuggestions, activeTab]);
 
   // Group active suggestions by type for display
-  const groupedActiveSuggestions = activeSuggestions.reduce((acc, suggestion) => {
+  const groupedActiveSuggestions = useMemo(() => activeSuggestions.reduce((acc, suggestion) => {
     const type = suggestion.type;
     if (!acc[type]) {
       acc[type] = [];
     }
     acc[type].push(suggestion);
     return acc;
-  }, {} as Record<string, Suggestion[]>);
+  }, {} as Record<string, Suggestion[]>), [activeSuggestions]);
 
   const handleAccept = async (suggestion: Suggestion) => {
     try {
@@ -217,36 +252,36 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
     }
   };
 
-  const toggleHighlights = () => {
+  const toggleHighlights = useCallback(() => {
     const newVisibility = !highlightsVisible;
     setHighlightsVisible(newVisibility);
     if (onToggleHighlights) {
       onToggleHighlights(newVisibility);
     }
-  };
+  }, [highlightsVisible, onToggleHighlights]);
 
   // Check scroll position and update navigation arrows
-  const checkScrollPosition = () => {
+  const checkScrollPosition = useCallback(() => {
     if (tabsScrollRef.current) {
       const { scrollLeft, scrollWidth, clientWidth } = tabsScrollRef.current;
       setCanScrollLeft(scrollLeft > 0);
       setCanScrollRight(scrollLeft < scrollWidth - clientWidth);
     }
-  };
+  }, []);
 
   // Scroll tabs left
-  const scrollTabsLeft = () => {
+  const scrollTabsLeft = useCallback(() => {
     if (tabsScrollRef.current) {
       tabsScrollRef.current.scrollBy({ left: -100, behavior: 'smooth' });
     }
-  };
+  }, []);
 
   // Scroll tabs right
-  const scrollTabsRight = () => {
+  const scrollTabsRight = useCallback(() => {
     if (tabsScrollRef.current) {
       tabsScrollRef.current.scrollBy({ left: 100, behavior: 'smooth' });
     }
-  };
+  }, []);
 
   // Check scroll position on mount and when tabs change
   useEffect(() => {
@@ -254,7 +289,7 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
     const handleResize = () => checkScrollPosition();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [categorizedSuggestions]);
+  }, [categorizedSuggestions, checkScrollPosition]);
 
   const getTabIcon = (tab: TabType) => {
     switch (tab) {
@@ -342,7 +377,7 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
               )}
             </p>
             <p className="text-xs text-gray-500 mt-1">
-              Areas modified 1+ times for clarity/engagement won't receive new suggestions.
+              Suggestions filtered for {goals.academicLevel.replace('-', ' ')} level focus.
               Use the toggle above to hide/show highlights in the editor.
             </p>
           </div>

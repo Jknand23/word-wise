@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, Plus, Search, Trash2, AlertCircle, Sparkles, Calendar, BookOpen, Filter } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
@@ -15,25 +15,7 @@ const MyDocuments: React.FC = () => {
 
   console.log('MyDocuments component render - user:', user?.email, 'authLoading:', authLoading);
 
-  useEffect(() => {
-    // Wait for authentication to complete before trying to load documents
-    if (authLoading) {
-      console.log('Authentication still loading, waiting...');
-      return;
-    }
-
-    // Only load documents when we have a confirmed authenticated user
-    if (user?.uid) {
-      console.log('Authentication complete, user found, loading documents...');
-      loadDocuments();
-    } else {
-      console.log('Authentication complete, no user found, setting empty documents');
-      setDocuments([]);
-      setIsLoading(false);
-    }
-  }, [user, authLoading]);
-
-  const loadDocuments = async () => {
+  const loadDocuments = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
@@ -76,7 +58,25 @@ const MyDocuments: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    // Wait for authentication to complete before trying to load documents
+    if (authLoading) {
+      console.log('Authentication still loading, waiting...');
+      return;
+    }
+
+    // Only load documents when we have a confirmed authenticated user
+    if (user?.uid) {
+      console.log('Authentication complete, user found, loading documents...');
+      loadDocuments();
+    } else {
+      console.log('Authentication complete, no user found, setting empty documents');
+      setDocuments([]);
+      setIsLoading(false);
+    }
+  }, [user, authLoading, loadDocuments]);
 
   const filteredDocuments = documents.filter(doc =>
     doc.title.toLowerCase().includes(searchTerm.toLowerCase()) ||

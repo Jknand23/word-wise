@@ -1,8 +1,35 @@
-import { collection, doc, getDocs, getDoc, query, where, orderBy, setDoc, updateDoc, arrayUnion, FieldValue, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, getDoc, query, where, orderBy, setDoc, updateDoc, arrayUnion, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { ModifiedArea, Suggestion } from '../types/suggestion';
-import { contentAnalysisService } from './contentAnalysisService';
-import type { ContentChange } from './contentAnalysisService';
+// Lightweight local fallback for content analysis (detect changed paragraphs)
+const contentAnalysisService = {
+  detectChangedParagraphs(oldContent: string, newContent: string): Array<{ index: number; oldText: string; newText: string; type: 'added' | 'modified' | 'deleted' }> {
+    const oldParagraphs = oldContent.split(/\n\s*\n/);
+    const newParagraphs = newContent.split(/\n\s*\n/);
+    const maxLen = Math.max(oldParagraphs.length, newParagraphs.length);
+    const changes: Array<{ index: number; oldText: string; newText: string; type: 'added' | 'modified' | 'deleted' }> = [];
+    for (let i = 0; i < maxLen; i++) {
+      const oldP = oldParagraphs[i] || '';
+      const newP = newParagraphs[i] || '';
+      if (oldP && !newP) {
+        changes.push({ index: i, oldText: oldP, newText: '', type: 'deleted' });
+      } else if (!oldP && newP) {
+        changes.push({ index: i, oldText: '', newText: newP, type: 'added' });
+      } else if (oldP !== newP) {
+        changes.push({ index: i, oldText: oldP, newText: newP, type: 'modified' });
+      }
+    }
+    return changes;
+  }
+};
+
+// Temporary type definition for deployment
+type ContentChange = {
+  index: number;
+  oldText: string;
+  newText: string;
+  type: 'added' | 'deleted' | 'modified';
+};
 
 // ✅ DIFFERENTIAL ANALYSIS - Document Change Record Type
 interface DocumentChangeRecord {
@@ -50,14 +77,14 @@ export const modificationTrackingService = {
       }
 
       // Create paragraph change records
-      const paragraphChanges: ParagraphChange[] = changes.map(change => ({
+      const paragraphChanges: ParagraphChange[] = changes.map((change) => ({
         paragraphIndex: change.index,
         oldHash: this.hashParagraph(change.oldText),
         newHash: this.hashParagraph(change.newText),
         oldText: change.oldText,
         newText: change.newText,
         changeType: change.type,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       }));
 
       // Store the change record in Firestore
@@ -170,7 +197,7 @@ export const modificationTrackingService = {
       console.error('🔍 [DifferentialAnalysis] ❌ CRITICAL ERROR getting unanalyzed changes:', error);
       console.error('Error details:', {
         message: error instanceof Error ? error.message : 'Unknown error',
-        code: (error as any)?.code,
+        code: (error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string') ? (error as { code: string }).code : undefined,
         stack: error instanceof Error ? error.stack : undefined
       });
       return [];

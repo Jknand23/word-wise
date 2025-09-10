@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, Share2, AlertCircle, FileText } from 'lucide-react';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import TextEditor from '../components/ai/TextEditor';
 import SuggestionsPanel from '../components/ai/SuggestionsPanel';
 import StructureSidebar from '../components/ai/StructureSidebar';
@@ -12,7 +14,7 @@ import { useSuggestionStore } from '../stores/suggestionStore';
 import { useWritingGoalsStore } from '../store/writingGoalsStore';
 import { documentService } from '../services/documentService';
 import { progressService } from '../services/progressService';
-import type { Suggestion, EssaySection, AssignmentRubric, RubricFeedback } from '../types/suggestion';
+import type { Suggestion, EssaySection, AssignmentRubric } from '../types/suggestion';
 
 const DocumentEditor: React.FC = () => {
   const { documentId } = useParams<{ documentId: string }>();
@@ -33,7 +35,7 @@ const DocumentEditor: React.FC = () => {
   // Rubric-related state
   const [showRubricManager, setShowRubricManager] = useState(false);
   const [selectedRubric, setSelectedRubric] = useState<AssignmentRubric | null>(null);
-  const [rubricFeedback, setRubricFeedback] = useState<RubricFeedback | null>(null);
+  // const [rubricFeedback, setRubricFeedback] = useState<RubricFeedback | null>(null);
   const [activeRightPanel, setActiveRightPanel] = useState<'suggestions' | 'rubric'>('suggestions');
   
   // Track the current document ID - this will be updated when a new document is created
@@ -130,7 +132,7 @@ const DocumentEditor: React.FC = () => {
       console.log('🔍 [DocumentEditor] Cleaning up subscription');
       clearSuggestions();
     };
-  }, [currentDocumentId, documentId, user?.uid, setActiveDocument]);
+  }, [currentDocumentId, documentId, user?.uid, setActiveDocument, clearSuggestions]);
 
   // Track quality metrics when new suggestions arrive
   useEffect(() => {
@@ -159,6 +161,50 @@ const DocumentEditor: React.FC = () => {
   }, [suggestions, user?.uid, currentDocumentId, documentContent, documentTitle]);
 
   // ✅ ADD: Handle page unload to ensure auto-save completes
+  // moved earlier: remove duplicate later definition
+  const handleSave = useCallback(async (overrideContent?: string, overrideTitle?: string) => {
+    if (!user?.uid) return;
+    
+    if (isSaving) {
+      return;
+    }
+    
+    setIsSaving(true);
+    try {
+      const contentToSave = overrideContent !== undefined ? overrideContent : documentContent;
+      const titleToSave = overrideTitle !== undefined ? overrideTitle : documentTitle;
+
+      if (documentId === 'new' && !currentDocumentId) {
+        const newDocumentId = await documentService.createDocument(
+          user.uid,
+          titleToSave,
+          contentToSave
+        );
+        setCurrentDocumentId(newDocumentId);
+        justCreatedRef.current = true;
+        navigate(`/document/${newDocumentId}`, { replace: true });
+      } else {
+        const docIdToUpdate = currentDocumentId || documentId;
+        if (docIdToUpdate && docIdToUpdate !== 'new') {
+          await documentService.updateDocument(
+            docIdToUpdate,
+            user.uid,
+            {
+              title: titleToSave,
+              content: contentToSave
+            }
+          );
+        }
+      }
+      setLastSaved(new Date());
+      hasUnsavedChangesRef.current = false;
+    } catch (error) {
+      console.error('Failed to save document:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [user?.uid, documentId, currentDocumentId, documentTitle, navigate, isSaving, documentContent]);
+
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (hasUnsavedChangesRef.current) {
@@ -200,7 +246,35 @@ const DocumentEditor: React.FC = () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [handleSave]);
+
+  const loadDocumentData = useCallback(async (docId: string) => {
+    if (!user?.uid) return;
+    setDocumentTitle('');
+    setDocumentContent('');
+    setLastSaved(null);
+    setIsLoading(true);
+    try {
+      const document = await documentService.getDocument(docId, user.uid);
+      if (document) {
+        setDocumentTitle(document.title);
+        setDocumentContent(document.content);
+        setLastSaved(document.updatedAt);
+        setCurrentDocumentId(docId);
+      } else {
+        setDocumentTitle('Document Not Found');
+        setDocumentContent('The requested document could not be found.');
+        setCurrentDocumentId(docId);
+      }
+    } catch (error) {
+      console.error('Failed to load document:', error);
+      setDocumentTitle('Error Loading Document');
+      setDocumentContent('Failed to load document. Please try again.');
+      setCurrentDocumentId(docId);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user?.uid]);
 
   useEffect(() => {
     // Prevent loading if already loading
@@ -228,95 +302,9 @@ const DocumentEditor: React.FC = () => {
         loadDocumentData(documentId);
       }
     }
-  }, [documentId, user?.uid, isLoading]);
+  }, [documentId, user?.uid, isLoading, loadDocumentData, currentDocumentId]);
 
-  const loadDocumentData = async (docId: string) => {
-    if (!user?.uid) return;
-    
-    // Clear existing content first to prevent duplication
-    setDocumentTitle('');
-    setDocumentContent('');
-    setLastSaved(null);
-    
-    // Set loading state to prevent overlapping loads
-    setIsLoading(true);
-    
-    try {
-      const document = await documentService.getDocument(docId, user.uid);
-      if (document) {
-        setDocumentTitle(document.title);
-        setDocumentContent(document.content);
-        setLastSaved(document.updatedAt);
-        setCurrentDocumentId(docId);
-      } else {
-        setDocumentTitle('Document Not Found');
-        setDocumentContent('The requested document could not be found.');
-        setCurrentDocumentId(docId); // Set ID even for not found to prevent repeated attempts
-      }
-    } catch (error) {
-      console.error('Failed to load document:', error);
-      setDocumentTitle('Error Loading Document');
-      setDocumentContent('Failed to load document. Please try again.');
-      setCurrentDocumentId(docId); // Set ID even for errors to prevent repeated attempts
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSave = async (overrideContent?: string, overrideTitle?: string) => {
-    if (!user?.uid) return;
-    
-    // Prevent multiple simultaneous saves
-    if (isSaving) {
-      return;
-    }
-    
-    setIsSaving(true);
-    try {
-      // Use provided content/title or current state
-      const contentToSave = overrideContent !== undefined ? overrideContent : documentContent;
-      const titleToSave = overrideTitle !== undefined ? overrideTitle : documentTitle;
-
-      if (documentId === 'new' && !currentDocumentId) {
-        // Create new document
-        const newDocumentId = await documentService.createDocument(
-          user.uid,
-          titleToSave,
-          contentToSave
-        );
-        
-        // Update the current document ID state
-        setCurrentDocumentId(newDocumentId);
-        
-        // Mark that we just created this document
-        justCreatedRef.current = true;
-        
-        // Update URL to reflect the new document ID
-        navigate(`/document/${newDocumentId}`, { replace: true });
-      } else {
-        // Update existing document
-        const docIdToUpdate = currentDocumentId || documentId;
-        
-        if (docIdToUpdate && docIdToUpdate !== 'new') {
-          await documentService.updateDocument(
-            docIdToUpdate,
-            user.uid,
-            {
-              title: titleToSave,
-              content: contentToSave
-            }
-          );
-        }
-      }
-      setLastSaved(new Date());
-      // Clear unsaved changes flag after successful save
-      hasUnsavedChangesRef.current = false;
-    } catch (error) {
-      console.error('Failed to save document:', error);
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  // duplicate removed
 
   const handleContentChange = (newContent: string, isFromSuggestion: boolean = false) => {
     setDocumentContent(newContent);
@@ -573,9 +561,7 @@ const DocumentEditor: React.FC = () => {
     });
 
     try {
-      // Import Firebase functions here to avoid importing at module level
-      const { collection, query, where, getDocs } = await import('firebase/firestore');
-      const { db } = await import('../lib/firebase');
+
 
       const q = query(
         collection(db, 'suggestions'),
@@ -604,9 +590,9 @@ const DocumentEditor: React.FC = () => {
     setActiveRightPanel('rubric');
   };
 
-  const handleRubricAnalysisUpdate = (feedback: RubricFeedback) => {
-    setRubricFeedback(feedback);
-  };
+  // const handleRubricAnalysisUpdate = (feedback: RubricFeedback) => {
+  //   setRubricFeedback(feedback);
+  // };
 
   if (isAuthLoading) {
     return (

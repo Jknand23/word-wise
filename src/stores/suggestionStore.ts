@@ -3,8 +3,17 @@ import { devtools } from 'zustand/middleware';
 import type { Suggestion, SuggestionRequest, ParagraphTag } from '../types/suggestion';
 import { suggestionService } from '../services/suggestionService';
 import { modificationTrackingService } from '../services/modificationTrackingService';
-import { paragraphTagService } from '../services/paragraphTagService';
-import { logger } from '../utils/logger';
+// import { paragraphTagService } from '../services/paragraphTagService';
+// Debug utility moved to temp folder for deployment
+// import { logger } from '../utils/logger';
+
+// Temporary logger stub for deployment
+const logger = {
+  debug: (message: string, ...args: unknown[]) => console.log('[DEBUG]', message, ...args),
+  info: (message: string, ...args: unknown[]) => console.log('[INFO]', message, ...args),
+  warn: (message: string, ...args: unknown[]) => console.warn('[WARN]', message, ...args),
+  error: (message: string, ...args: unknown[]) => console.error('[ERROR]', message, ...args),
+};
 
 interface SuggestionStore {
   // State
@@ -230,7 +239,9 @@ export const useSuggestionStore = create<SuggestionStore>()(
       },
 
       // Filter suggestions to exclude those from "Done" paragraphs
-      getFilteredSuggestions: (content: string, paragraphTags: ParagraphTag[]) => {
+      getFilteredSuggestions: (_content: string, _paragraphTags: ParagraphTag[]) => {
+        void _content;
+        void _paragraphTags;
         const { suggestions } = get();
         return suggestions;
       },

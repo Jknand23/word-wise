@@ -9,9 +9,11 @@ import {
   query, 
   where, 
   serverTimestamp,
-  Timestamp 
+  Timestamp,
+  FieldValue 
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+/* removed unused FirebaseError import */
 
 export interface Document {
   id: string;
@@ -56,14 +58,12 @@ class DocumentService {
       const docRef = await addDoc(collection(db, 'documents'), docData);
       console.log('Document created with ID:', docRef.id);
       return docRef.id;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error creating document:', error);
-      console.error('Error details:', {
-        code: (error as any)?.code,
-        message: (error as any)?.message,
-        userId
-      });
-      throw new Error(`Failed to create document: ${(error as any)?.message || 'Unknown error'}`);
+      const code = (error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string') ? (error as { code: string }).code : undefined;
+      const message = (error && typeof error === 'object' && 'message' in error && typeof (error as { message?: unknown }).message === 'string') ? (error as { message: string }).message : 'Unknown error';
+      console.error('Error details:', { code, message, userId });
+      throw new Error(`Failed to create document: ${message}`);
     }
   }
 
@@ -92,7 +92,7 @@ class DocumentService {
         updatedAt: data.updatedAt?.toDate() || new Date(),
         wordCount: data.wordCount,
       };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error getting document:', error);
       throw new Error('Failed to get document');
     }
@@ -134,14 +134,12 @@ class DocumentService {
 
       console.log('Returning', documents.length, 'documents');
       return documents;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error getting user documents:', error);
-      console.error('Error details:', {
-        code: (error as any)?.code,
-        message: (error as any)?.message,
-        userId
-      });
-      throw new Error(`Failed to get user documents: ${(error as any)?.message || 'Unknown error'}`);
+      const code = (error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string') ? (error as { code: string }).code : undefined;
+      const message = (error && typeof error === 'object' && 'message' in error && typeof (error as { message?: unknown }).message === 'string') ? (error as { message: string }).message : 'Unknown error';
+      console.error('Error details:', { code, message, userId });
+      throw new Error(`Failed to get user documents: ${message}`);
     }
   }
 
@@ -161,17 +159,18 @@ class DocumentService {
       }
 
       // Calculate word count if content is being updated
-      const updateData: any = {
-        ...updates,
+      const updatePayload: { title?: string; content?: string; updatedAt: FieldValue; wordCount?: number } = {
+        ...('title' in updates ? { title: updates.title } : {}),
+        ...('content' in updates ? { content: updates.content } : {}),
         updatedAt: serverTimestamp(),
       };
 
       if (updates.content !== undefined) {
-        updateData.wordCount = this.calculateWordCount(updates.content);
+        updatePayload.wordCount = this.calculateWordCount(updates.content);
       }
 
-      await updateDoc(docRef, updateData);
-    } catch (error) {
+      await updateDoc(docRef, updatePayload);
+    } catch (error: unknown) {
       console.error('Error updating document:', error);
       throw new Error('Failed to update document');
     }
@@ -193,7 +192,7 @@ class DocumentService {
       }
 
       await deleteDoc(docRef);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error deleting document:', error);
       throw new Error('Failed to delete document');
     }

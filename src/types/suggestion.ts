@@ -1,3 +1,5 @@
+import type { Timestamp } from 'firebase/firestore'
+
 export interface Suggestion {
   id: string;
   documentId: string;
@@ -261,8 +263,8 @@ export interface ParagraphTagData {
   text: string;
   tagType: 'needs-review' | 'done';
   note?: string;
-  createdAt: any; // Firestore timestamp
-  updatedAt: any; // Firestore timestamp
+  createdAt: Timestamp; // Firestore timestamp
+  updatedAt: Timestamp; // Firestore timestamp
 }
 
 export interface TaggingState {

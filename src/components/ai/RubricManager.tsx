@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { X, FileText, Trash2, CheckCircle, AlertCircle, Loader, Edit } from 'lucide-react';
 import { rubricService } from '../../services/rubricService';
 import StructuredRubricForm from './StructuredRubricForm';
@@ -20,15 +20,11 @@ const RubricManager: React.FC<RubricManagerProps> = ({
   const [rubrics, setRubrics] = useState<AssignmentRubric[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [isParsingRubric, setIsParsingRubric] = useState(false);
+  const [, setIsParsingRubric] = useState(false);
   const [selectedRubric, setSelectedRubric] = useState<AssignmentRubric | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadRubrics();
-  }, [documentId, userId]);
-
-  const loadRubrics = async () => {
+  const loadRubrics = useCallback(async () => {
     try {
       setIsLoading(true);
       const documentRubrics = await rubricService.getDocumentRubrics(documentId, userId);
@@ -39,7 +35,11 @@ const RubricManager: React.FC<RubricManagerProps> = ({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [documentId, userId]);
+
+  useEffect(() => {
+    loadRubrics();
+  }, [loadRubrics]);
 
   const handleSaveStructuredRubric = async (rubricData: Omit<AssignmentRubric, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {

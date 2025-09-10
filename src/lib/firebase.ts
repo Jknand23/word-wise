@@ -1,7 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import { getDatabase } from 'firebase/database';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -42,8 +41,5 @@ googleProvider.setCustomParameters({
 
 // Initialize Cloud Firestore and get a reference to the service
 export const db = getFirestore(app);
-
-// Initialize Realtime Database and get a reference to the service
-export const realtimeDb = getDatabase(app);
 
 export default app;

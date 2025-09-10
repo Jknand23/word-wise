@@ -2,14 +2,12 @@ import {
   collection, 
   doc, 
   addDoc, 
-  getDoc, 
   getDocs, 
   updateDoc, 
   deleteDoc, 
   query, 
   where, 
-  serverTimestamp,
-  Timestamp 
+  serverTimestamp
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { ParagraphTag, ParagraphTagData } from '../types/suggestion';
@@ -43,9 +41,12 @@ class ParagraphTagService {
 
       const docRef = await addDoc(collection(db, this.collectionName), tagData);
       return docRef.id;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error creating paragraph tag:', error);
-      throw new Error(`Failed to create paragraph tag: ${(error as any)?.message || 'Unknown error'}`);
+      const message = (error && typeof error === 'object' && 'message' in error && typeof (error as { message?: unknown }).message === 'string')
+        ? (error as { message: string }).message
+        : 'Unknown error';
+      throw new Error(`Failed to create paragraph tag: ${message}`);
     }
   }
 
@@ -80,9 +81,12 @@ class ParagraphTagService {
       // Sort by paragraph index
       tags.sort((a, b) => a.paragraphIndex - b.paragraphIndex);
       return tags;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error getting document tags:', error);
-      throw new Error(`Failed to get document tags: ${(error as any)?.message || 'Unknown error'}`);
+      const message = (error && typeof error === 'object' && 'message' in error && typeof (error as { message?: unknown }).message === 'string')
+        ? (error as { message: string }).message
+        : 'Unknown error';
+      throw new Error(`Failed to get document tags: ${message}`);
     }
   }
 
@@ -99,13 +103,13 @@ class ParagraphTagService {
     try {
       const docRef = doc(db, this.collectionName, tagId);
       
-      const updateData: any = {
+      const updateData: Partial<Pick<ParagraphTag, 'tagType' | 'note' | 'text' | 'startIndex' | 'endIndex'>> & { updatedAt: ReturnType<typeof serverTimestamp> } = {
         ...updates,
         updatedAt: serverTimestamp(),
       };
 
       await updateDoc(docRef, updateData);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error updating paragraph tag:', error);
       throw new Error('Failed to update paragraph tag');
     }
@@ -169,7 +173,7 @@ class ParagraphTagService {
     const paragraphs = content.split(/\n\s*\n/).filter(p => p.trim().length > 0);
     const result: Array<{ text: string; startIndex: number; endIndex: number }> = [];
     
-    let _currentIndex = 0;
+    // track index during scanning if needed in future
     let searchIndex = 0;
     
     for (const paragraph of paragraphs) {

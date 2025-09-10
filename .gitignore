@@ -23,6 +23,7 @@ dist-ssr
 # Firebase
 .firebase/
 functions/.env.*
+functions/lib/
 
 # Editor directories and files
 .vscode/*
@@ -34,3 +35,9 @@ functions/.env.*
 *.njsproj
 *.sln
 *.sw?
+
+# Project-specific
+temp-debug-files/
+*.backup
+*.map
+*.exe

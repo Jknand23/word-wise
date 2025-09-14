@@ -83,8 +83,12 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
     )
   ), [paragraphFilteredSuggestions, goals.academicLevel]);
 
-  // Final filtered suggestions
-  const filteredSuggestions = gradeLevelFilteredSuggestions;
+  // Final filtered suggestions with safe fallback if filtering removes everything
+  const filteredSuggestions = useMemo(() => {
+    if (gradeLevelFilteredSuggestions.length > 0) return gradeLevelFilteredSuggestions;
+    if (paragraphFilteredSuggestions.length > 0) return paragraphFilteredSuggestions;
+    return suggestions; // ultimate fallback
+  }, [gradeLevelFilteredSuggestions, paragraphFilteredSuggestions, suggestions]);
 
   // 🔍 DEBUG: Log grade-level filtering results
   useEffect(() => {
@@ -203,6 +207,15 @@ const SuggestionsPanel: React.FC<SuggestionsPanelProps> = ({
 
   // Show structure suggestions count in the advanced tab
   const structureSuggestionsCount = categorizedSuggestions.advanced.filter(s => s.type === 'structure').length;
+
+  // Auto-switch to a tab that has content to avoid empty initial view
+  useEffect(() => {
+    const order: TabType[] = ['correctness', 'clarity', 'engagement', 'advanced'];
+    const firstWithContent = order.find(tab => (categorizedSuggestions as Record<string, Suggestion[]>)[tab].length > 0);
+    if (firstWithContent && activeTab !== firstWithContent) {
+      setActiveTab(firstWithContent);
+    }
+  }, [filteredSuggestions]);
 
   // Get the suggestions for the currently active tab
   const activeSuggestions = useMemo(() => categorizedSuggestions[activeTab], [categorizedSuggestions, activeTab]);

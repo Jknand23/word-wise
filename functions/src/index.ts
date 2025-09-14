@@ -23,9 +23,9 @@ const openaiApiKey = defineSecret("OPENAI_API_KEY");
 const app = initializeApp();
 const db = getFirestore(app);
 
-// CORS options
+// CORS options - allow all during development to avoid misconfig
 const corsOptions = {
-  cors: ["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "https://wordwise-ai-3a4e1.web.app"],
+  cors: true,
 };
 
 const commonOptions = {
@@ -361,6 +361,178 @@ async function getOpenAICompletion(
 }
 
 /**
+ * Lightweight, deterministic rule-based corrections for speed and stability
+ * - Fix common contractions (dont -> don't)
+ * - Collapse multiple spaces
+ * - Ensure final sentence ends with punctuation
+ * - Suggest fixes for a small set of frequent misspellings
+ */
+function generateRuleBasedSuggestions(
+  content: string,
+  options?: { maxSuggestions?: number; excludePairs?: Array<{ originalText: string; suggestedText: string }>; }
+): Array<{
+  type: string;
+  category: string;
+  severity: string;
+  originalText: string;
+  suggestedText: string;
+  explanation: string;
+  confidence: number;
+  startIndex: number;
+  endIndex: number;
+  grammarRule?: string;
+}> {
+  const result: Array<{
+    type: string;
+    category: string;
+    severity: string;
+    originalText: string;
+    suggestedText: string;
+    explanation: string;
+    confidence: number;
+    startIndex: number;
+    endIndex: number;
+    grammarRule?: string;
+  }> = [];
+
+  if (!content || content.trim().length === 0) return result;
+
+  const exclude = new Set<string>((options?.excludePairs || []).map(p => `${p.originalText}→${p.suggestedText}`));
+  const pushSuggestion = (
+    originalText: string,
+    suggestedText: string,
+    startIndex: number,
+    endIndex: number,
+    explanation: string,
+    grammarRule?: string,
+    type: 'spelling' | 'grammar' = 'spelling',
+    severity: 'low' | 'medium' | 'high' = 'high',
+    confidence = 0.95
+  ) => {
+    const key = `${originalText}→${suggestedText}`;
+    if (exclude.has(key)) return;
+    result.push({
+      type,
+      category: 'error',
+      severity,
+      originalText,
+      suggestedText,
+      explanation,
+      confidence,
+      startIndex,
+      endIndex,
+      grammarRule,
+    });
+  };
+
+  // 1) Contractions
+  const contractions: Record<string, string> = {
+    "dont": "don't",
+    "cant": "can't",
+    "wont": "won't",
+    "didnt": "didn't",
+    "isnt": "isn't",
+    "arent": "aren't",
+    "wasnt": "wasn't",
+    "werent": "weren't",
+    "couldnt": "couldn't",
+    "shouldnt": "shouldn't",
+    "wouldnt": "wouldn't",
+    "mustnt": "mustn't",
+    "im": "I'm",
+    "ive": "I've",
+    "id": "I'd",
+    "ill": "I'll",
+    "lets": "let's",
+    "theres": "there's",
+    "whats": "what's",
+    "hes": "he's",
+    "shes": "she's",
+    "theyre": "they're",
+    "youre": "you're",
+    "weve": "we've",
+    "itll": "it'll",
+    "itd": "it'd",
+    "shouldve": "should've",
+    "couldve": "could've",
+    "wouldve": "would've",
+  };
+
+  const contractionRegex = new RegExp(`\\b(${Object.keys(contractions).join('|')})\\b`, 'gi');
+  for (let match; (match = contractionRegex.exec(content)) && (options?.maxSuggestions ?? Infinity) > result.length;) {
+    const orig = match[0];
+    const corrected = contractions[orig.toLowerCase()];
+    if (corrected) {
+      const start = match.index;
+      const end = start + orig.length;
+      pushSuggestion(
+        orig,
+        corrected,
+        start,
+        end,
+        'Add missing apostrophe in contraction.',
+        'Contractions (apostrophes)',
+        'spelling',
+        'high',
+        0.98
+      );
+    }
+  }
+
+  // 2) Multiple spaces → single space (limit to first N)
+  const multiSpaceRegex = / {2,}/g;
+  for (let match; (match = multiSpaceRegex.exec(content)) && (options?.maxSuggestions ?? Infinity) > result.length;) {
+    const orig = match[0];
+    const start = match.index;
+    const end = start + orig.length;
+    pushSuggestion(orig, ' ', start, end, 'Collapse multiple spaces to a single space.', 'Spacing normalization', 'grammar', 'low', 0.9);
+  }
+
+  // 3) Frequent misspellings (small curated set)
+  const misspellings: Record<string, string> = {
+    'alot': 'a lot',
+    'definately': 'definitely',
+    'seperate': 'separate',
+    'recieve': 'receive',
+    'wich': 'which',
+    'becuase': 'because',
+    'ocurred': 'occurred',
+    'occured': 'occurred',
+  };
+  const misspellRegex = new RegExp(`\\b(${Object.keys(misspellings).join('|')})\\b`, 'gi');
+  for (let match; (match = misspellRegex.exec(content)) && (options?.maxSuggestions ?? Infinity) > result.length;) {
+    const orig = match[0];
+    const corrected = misspellings[orig.toLowerCase()];
+    const start = match.index;
+    const end = start + orig.length;
+    pushSuggestion(orig, corrected, start, end, 'Correct common misspelling.', 'Common misspellings', 'spelling', 'high', 0.96);
+  }
+
+  // 4) Ensure final sentence has end punctuation (., !, ?)
+  const trimmed = content.trimEnd();
+  if (trimmed.length > 0) {
+    const lastChar = trimmed[trimmed.length - 1];
+    if (!/[.!?]/.test(lastChar)) {
+      const start = content.length - (content.match(/\s*$/)?.[0]?.length || 0) - 1;
+      const end = start + 1;
+      pushSuggestion(
+        trimmed.slice(Math.max(0, trimmed.length - 1)),
+        `${lastChar}.`,
+        Math.max(0, content.length - 1),
+        Math.max(0, content.length),
+        'Add end punctuation to complete the sentence.',
+        'End punctuation',
+        'grammar',
+        'medium',
+        0.9
+      );
+    }
+  }
+
+  return result.slice(0, options?.maxSuggestions ?? 100);
+}
+
+/**
  * ===================================================================
  *                         SUGGESTION FUNCTIONS
  * ===================================================================
@@ -655,6 +827,56 @@ export const analyzeSuggestions = onCall(commonOptions, async (request) => {
     }
     console.log('🔍 [Firebase] Cache miss - proceeding with AI analysis');
 
+    // FAST PATH: Deterministic rule-based checks (cheap and stable)
+    try {
+      const excludePairs = acceptedSuggestions.map(s => ({ originalText: String((s as unknown as { originalText?: string }).originalText || ''), suggestedText: String((s as unknown as { suggestedText?: string }).suggestedText || '') }));
+      const rbSuggestions = generateRuleBasedSuggestions(String(content), { maxSuggestions: 50, excludePairs });
+      if (rbSuggestions.length > 0 && documentId && userId) {
+        console.log(`⚡ [Firebase] Rule-based suggestions found: ${rbSuggestions.length}`);
+        const batch = db.batch();
+        let wrote = 0;
+        rbSuggestions.forEach((sug) => {
+          if (!sug.originalText || !sug.suggestedText) return;
+          const suggestionRef = db.collection('suggestions').doc();
+          const payload = {
+            id: suggestionRef.id,
+            documentId,
+            userId,
+            status: 'pending',
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+            originalText: sug.originalText,
+            suggestedText: sug.suggestedText,
+            type: sug.type,
+            category: sug.category,
+            severity: sug.severity,
+            confidence: sug.confidence,
+            explanation: sug.explanation,
+            grammarRule: sug.grammarRule || null,
+            startIndex: Math.max(0, sug.startIndex || 0),
+            endIndex: Math.max(0, sug.endIndex || (sug.startIndex || 0) + String(sug.originalText).length),
+            source: 'rule-based',
+          } as Record<string, unknown>;
+          batch.set(suggestionRef, payload);
+          wrote++;
+        });
+        if (wrote > 0) {
+          await batch.commit();
+          console.log(`⚡ [Firebase] Wrote ${wrote} rule-based suggestions to Firestore`);
+          // For incremental/differential runs, return early to keep UX snappy
+          if (responseMetadata.analysisType !== 'full') {
+            responseMetadata.processingTime = Date.now() - startTime;
+            return {
+              metadata: responseMetadata,
+              message: `${wrote} quick suggestions posted.`,
+            };
+          }
+        }
+      }
+    } catch (rbError) {
+      console.warn('⚠️ [Firebase] Rule-based suggestion generation failed (continuing with AI):', rbError);
+    }
+
     // Prepare system prompt and user prompt
     const systemPrompt = generateSystemPrompt(writingGoals || { academicLevel: 'undergrad' });
     let userPrompt: string;
@@ -844,7 +1066,7 @@ export const analyzeEssayStructure = onCall(corsOptions, async (request) => {
   const { structure, structureSuggestions } = mockResponse;
 
   // Save the structure analysis to Firestore
-  const structureRef = db.collection("essayStructures").doc();
+  const structureRef = db.collection("essayStructures").doc(`${userId}_${documentId}`);
   await structureRef.set({
     ...structure,
     analysisId: structureRef.id,

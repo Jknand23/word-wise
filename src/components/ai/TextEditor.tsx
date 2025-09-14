@@ -4,6 +4,8 @@ import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useSuggestionStore } from '../../stores/suggestionStore';
 import { useParagraphTagStore } from '../../stores/paragraphTagStore';
+import { modificationTrackingService } from '../../services/modificationTrackingService';
+import { useWritingGoalsStore } from '../../store/writingGoalsStore';
 import SuggestionTooltip from './SuggestionTooltip';
 import ParagraphTagger from './ParagraphTagger';
 import type { Suggestion, EssaySection } from '../../types/suggestion';
@@ -26,7 +28,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
   selectedSuggestion,
   selectedSection = null,
   userId = 'demo-user',
-  // highlightsVisible prop is accepted but not used to avoid unnecessary state
+  highlightsVisible = true,
   onTagsChange
 }) => {
   const [content, setContent] = useState(initialContent);
@@ -44,6 +46,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
   }>>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastAnalyzedContentRef = useRef<string>(initialContent || '');
   // Get actual pixel position of a character in the textarea
   const getCharacterPosition = React.useCallback((charIndex: number): number => {
     if (!textareaRef.current) {
@@ -105,6 +108,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
   } = useParagraphTagStore();
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const { goals, getGrammarStrictness, getVocabularyLevel, getToneRecommendation } = useWritingGoalsStore();
 
   // Update content when initialContent changes
   useEffect(() => {
@@ -294,13 +298,44 @@ const TextEditor: React.FC<TextEditorProps> = ({
     
     try {
       console.log('Starting auto-analysis...');
+      // Build context window based on paragraph-level diffs
+      let contextWindow: Array<{ index: number; text: string; isChanged?: boolean }> | undefined = undefined;
+      try {
+        const prev = lastAnalyzedContentRef.current || '';
+        const changes = await modificationTrackingService.trackParagraphChanges(
+          documentId,
+          userId,
+          prev,
+          content
+        );
+        const changed = changes.filter(c => c.type === 'added' || c.type === 'modified');
+        if (changed.length > 0) {
+          contextWindow = changed.map(c => ({ index: c.index, text: c.newText, isChanged: true }));
+        }
+      } catch (diffError) {
+        console.warn('Diffing failed, continuing without contextWindow', diffError);
+      }
+
+      const writingGoals = {
+        academicLevel: goals.academicLevel,
+        assignmentType: goals.assignmentType,
+        customInstructions: goals.customInstructions || '',
+        grammarStrictness: getGrammarStrictness(),
+        vocabularyLevel: getVocabularyLevel(),
+        toneRecommendation: getToneRecommendation()
+      };
+
       await requestAnalysis({
         content,
         documentId,
         userId,
-        analysisType: 'incremental' // Use incremental analysis for better performance
+        analysisType: 'incremental',
+        contextWindow,
+        writingGoals,
+        timestamp: Date.now()
       });
       console.log('Auto-analysis completed');
+      lastAnalyzedContentRef.current = content;
     } catch (error) {
       console.error('Auto-analysis failed:', error);
       // Don't show error alerts for auto-analysis failures
@@ -334,14 +369,26 @@ const TextEditor: React.FC<TextEditorProps> = ({
 
     try {
       console.log('Starting FULL analysis...', { contentLength: content.length, documentId, userId });
+      const writingGoals = {
+        academicLevel: goals.academicLevel,
+        assignmentType: goals.assignmentType,
+        customInstructions: goals.customInstructions || '',
+        grammarStrictness: getGrammarStrictness(),
+        vocabularyLevel: getVocabularyLevel(),
+        toneRecommendation: getToneRecommendation()
+      };
+
       await requestAnalysis({
         content,
         documentId,
         userId,
         analysisType: 'full',
         bypassCache: true,
+        writingGoals,
+        timestamp: Date.now()
       });
       console.log('Manual analysis completed successfully');
+      lastAnalyzedContentRef.current = content;
       
       // 🔍 DEBUG: Wait a moment and check what's in Firestore
       setTimeout(async () => {
@@ -672,6 +719,67 @@ const TextEditor: React.FC<TextEditorProps> = ({
     }
   }, [filteredByTag, paragraphBoundaries, tags, getCharacterPosition]);
 
+  // Build inline highlight segments to mirror textarea content accurately
+  const highlightSegments = React.useMemo(() => {
+    if (!highlightsVisible || suggestions.length === 0 || !content) {
+      return [{ text: content, highlight: null as null | Suggestion }];
+    }
+    // Step 1: validate and re-index suggestions against current content
+    const valid: Suggestion[] = [];
+    suggestions.forEach((s) => {
+      const textAt = content.slice(s.startIndex, s.endIndex);
+      if (textAt === s.originalText) {
+        valid.push(s);
+      } else {
+        const idx = content.indexOf(s.originalText);
+        if (idx !== -1) {
+          valid.push({ ...s, startIndex: idx, endIndex: idx + s.originalText.length });
+        }
+      }
+    });
+    // Step 2: sort and merge/clip overlapping ranges to prevent duplicate text rendering
+    const sorted = valid
+      .filter((s) => s.startIndex < s.endIndex)
+      .map((s) => ({
+        ...s,
+        startIndex: Math.max(0, Math.min(s.startIndex, content.length)),
+        endIndex: Math.max(0, Math.min(s.endIndex, content.length))
+      }))
+      .sort((a, b) => (a.startIndex !== b.startIndex ? a.startIndex - b.startIndex : a.endIndex - b.endIndex));
+
+    const nonOverlap: Suggestion[] = [];
+    let lastEnd = -1;
+    for (const s of sorted) {
+      let start = s.startIndex;
+      let end = s.endIndex;
+      if (end <= lastEnd) {
+        // Fully covered by previous; skip
+        continue;
+      }
+      if (start < lastEnd) {
+        // Clip to avoid overlap
+        start = lastEnd;
+      }
+      if (start >= end) continue;
+      nonOverlap.push({ ...s, startIndex: start, endIndex: end });
+      lastEnd = end;
+    }
+    const segments: Array<{ text: string; highlight: null | Suggestion }> = [];
+    let cursor = 0;
+    for (const s of nonOverlap) {
+      if (s.startIndex > cursor) {
+        segments.push({ text: content.slice(cursor, s.startIndex), highlight: null });
+      }
+      const segText = content.slice(s.startIndex, s.endIndex);
+      segments.push({ text: segText, highlight: s });
+      cursor = s.endIndex;
+    }
+    if (cursor < content.length) {
+      segments.push({ text: content.slice(cursor), highlight: null });
+    }
+    return segments;
+  }, [content, suggestions, highlightsVisible]);
+
   return (
     <div className="h-full flex flex-col bg-white">
       {/* Editor Header */}
@@ -720,17 +828,58 @@ const TextEditor: React.FC<TextEditorProps> = ({
           <div className="max-w-4xl mx-auto p-4 relative">
             {/* Main Unified Textarea */}
             <div className="relative">
+              {/* Mirror overlay rendering full text with inline highlights */}
+              {textareaRef.current && (
+                <div
+                  className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-words font-sans"
+                  style={{
+                    padding: window.getComputedStyle(textareaRef.current).padding,
+                    // Hide overlay glyphs so only background colors show; base textarea text remains visible
+                    color: 'transparent',
+                    WebkitTextFillColor: 'transparent',
+                    lineHeight: window.getComputedStyle(textareaRef.current).lineHeight,
+                    letterSpacing: window.getComputedStyle(textareaRef.current).letterSpacing,
+                    fontFamily: window.getComputedStyle(textareaRef.current).fontFamily,
+                    fontSize: window.getComputedStyle(textareaRef.current).fontSize,
+                    whiteSpace: 'pre-wrap',
+                    zIndex: 0,
+                  }}
+                >
+                  {highlightSegments.map((seg, i) => {
+                    if (!seg.highlight) {
+                      return <span key={`seg-${i}`}>{seg.text}</span>;
+                    }
+                    const type = seg.highlight.type;
+                    const cls = type === 'spelling'
+                      ? 'bg-red-100'
+                      : type === 'grammar'
+                        ? 'bg-orange-100'
+                        : type === 'clarity'
+                          ? 'bg-yellow-100'
+                          : type === 'engagement'
+                            ? 'bg-blue-100'
+                            : 'bg-green-100';
+                    return (
+                      <span key={`seg-${i}`} className={`${cls} rounded-sm`}>{seg.text}</span>
+                    );
+                  })}
+                </div>
+              )}
               <textarea
                 ref={textareaRef}
                 value={content}
                 onChange={(e) => handleContentChange(e.target.value)}
                 onClick={handleTextareaClick}
                 placeholder="Start writing your document here..."
+                spellCheck={true}
                 className="w-full p-4 pr-20 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-800 leading-relaxed overflow-hidden font-sans"
                 style={{ 
                   minHeight: '500px',
                   height: 'auto',
-                  lineHeight: '1.5'
+                  lineHeight: '1.5',
+                  backgroundColor: 'transparent',
+                  position: 'relative',
+                  zIndex: 1
                 }}
                 rows={Math.max(20, content.split('\n').length + 5)}
               />

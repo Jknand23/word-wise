@@ -1,13 +1,25 @@
 // Minimal suggestionService stub for deployment
 // Full implementation moved to temp-debug-files during build
 
-import { httpsCallable, getFunctions } from 'firebase/functions';
+import { httpsCallable, getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import { doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import app, { db } from '../lib/firebase';
 import type { Suggestion, SuggestionRequest, StructureAnalysisRequest, StructureAnalysisResponse, EssayStructure } from '../types/suggestion';
 
-// Initialize Firebase Functions
-const functions = getFunctions(app);
+// Initialize Firebase Functions with explicit region
+const functions = getFunctions(app, 'us-central1');
+
+// Optionally connect to emulator when running locally
+if (typeof window !== 'undefined' && location.hostname === 'localhost') {
+  try {
+    // Only connect if not already connected
+    // Note: Safe to call multiple times; Firebase SDK guards duplicate connections
+    connectFunctionsEmulator(functions, 'localhost', 5001);
+    console.log('[INFO] Connected Functions to emulator at localhost:5001');
+  } catch (e) {
+    console.warn('[WARN] Could not connect functions emulator:', e);
+  }
+}
 
 // Simple logger for deployment
 const logger = {

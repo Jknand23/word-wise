@@ -84,7 +84,7 @@ export interface StructureAnalysisResponse {
 
 export interface WritingGoalsConfig {
   academicLevel: 'middle-school' | 'high-school' | 'undergrad';
-  assignmentType: 'essay' | 'reflection' | 'report';
+  assignmentType: 'essay' | 'reflection' | 'report' | 'research-paper' | 'creative-writing' | 'other';
   customInstructions?: string;
   grammarStrictness: 'lenient' | 'moderate' | 'strict';
   vocabularyLevel: 'simple' | 'intermediate' | 'advanced';
@@ -101,6 +101,14 @@ export interface SuggestionRequest {
   writingGoals?: WritingGoalsConfig;
   paragraphTags?: ParagraphTag[]; // Include paragraph tags to exclude "Done" paragraphs
   bypassCache?: boolean; // Skip cache and force fresh analysis
+  // Optional context window for differential/incremental analyses
+  contextWindow?: Array<{
+    index: number;
+    text: string;
+    isChanged?: boolean;
+  }>;
+  // Optional timestamp for request ordering/metrics
+  timestamp?: number;
 }
 
 export interface SuggestionResponse {

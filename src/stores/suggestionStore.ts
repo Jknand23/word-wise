@@ -139,12 +139,24 @@ export const useSuggestionStore = create<SuggestionStore>()(
               acceptedSuggestion, 
               acceptedSuggestion.suggestedText
             );
+
+            // Remove any overlapping pending suggestions of the same type whose originalText
+            // no longer appears at their indices in the updated content (client-side stale cleanup)
+            const pruned = currentSuggestions.filter(s => {
+              if (s.id === suggestionId) return false;
+              // Overlap check
+              const overlaps = !(s.endIndex <= acceptedSuggestion.startIndex || acceptedSuggestion.endIndex <= s.startIndex);
+              // Keep non-overlapping
+              if (!overlaps) return true;
+              // If overlapping and same type, drop to avoid double-fixing cascade
+              if (s.type === acceptedSuggestion.type) return false;
+              return true;
+            });
+            set({ suggestions: pruned });
           }
 
-          // Simply remove the accepted suggestion - don't try to update indices here
-          // The document editor will handle content updates and trigger fresh analysis
-          const updatedSuggestions = currentSuggestions.filter(s => s.id !== suggestionId);
-          set({ suggestions: updatedSuggestions });
+          // Remove the accepted suggestion from any remaining list (safety)
+          set(state => ({ suggestions: state.suggestions.filter(s => s.id !== suggestionId) }));
           
         } catch (error) {
           console.error('Failed to accept suggestion:', error);

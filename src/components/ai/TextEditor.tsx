@@ -724,16 +724,53 @@ const TextEditor: React.FC<TextEditorProps> = ({
     if (!highlightsVisible || suggestions.length === 0 || !content) {
       return [{ text: content, highlight: null as null | Suggestion }];
     }
+    // Helpers to ensure word-boundary matching for spelling suggestions
+    const isLetter = (ch: string) => /[A-Za-z]/.test(ch);
+    const isWordBoundary = (text: string, start: number, end: number) => {
+      const prev = start - 1 >= 0 ? text[start - 1] : '';
+      const next = end < text.length ? text[end] : '';
+      const leftBoundary = start === 0 || !isLetter(prev);
+      const rightBoundary = end === text.length || !isLetter(next);
+      return leftBoundary && rightBoundary;
+    };
+    const findBoundedIndex = (text: string, phrase: string, from: number = 0) => {
+      if (!phrase) return -1;
+      let idx = text.indexOf(phrase, from);
+      while (idx !== -1) {
+        const end = idx + phrase.length;
+        if (isWordBoundary(text, idx, end)) return idx;
+        idx = text.indexOf(phrase, idx + 1);
+      }
+      return -1;
+    };
+
     // Step 1: validate and re-index suggestions against current content
     const valid: Suggestion[] = [];
     suggestions.forEach((s) => {
-      const textAt = content.slice(s.startIndex, s.endIndex);
-      if (textAt === s.originalText) {
-        valid.push(s);
-      } else {
-        const idx = content.indexOf(s.originalText);
-        if (idx !== -1) {
-          valid.push({ ...s, startIndex: idx, endIndex: idx + s.originalText.length });
+      const direct = content.slice(s.startIndex, s.endIndex);
+      if (direct === s.originalText) {
+        if (s.type === 'spelling') {
+          // Ensure whole-word match for spelling suggestions
+          if (isWordBoundary(content, s.startIndex, s.endIndex)) {
+            valid.push(s);
+          } else {
+            // Try to re-locate a bounded occurrence
+            const idx = findBoundedIndex(content, s.originalText);
+            if (idx !== -1) valid.push({ ...s, startIndex: idx, endIndex: idx + s.originalText.length });
+          }
+        } else {
+          valid.push(s);
+        }
+        return;
+      }
+      // Fallback: locate by text content; for spelling, require word boundaries
+      if (s.originalText && s.originalText.length > 0) {
+        if (s.type === 'spelling') {
+          const idx = findBoundedIndex(content, s.originalText);
+          if (idx !== -1) valid.push({ ...s, startIndex: idx, endIndex: idx + s.originalText.length });
+        } else {
+          const idx = content.indexOf(s.originalText);
+          if (idx !== -1) valid.push({ ...s, startIndex: idx, endIndex: idx + s.originalText.length });
         }
       }
     });
